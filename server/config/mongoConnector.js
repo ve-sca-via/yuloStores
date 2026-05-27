@@ -1,4 +1,5 @@
-import logger from "../utils/logger";
+import logger from "../utils/logger.js";
+import mongoose from "mongoose";
 async function mongoConnect(){
     try {
         await mongoose.connect(process.env.MONGODB_URI);
@@ -8,3 +9,5 @@ async function mongoConnect(){
         process.exit(1);
     }
 }
+
+export {mongoConnect};

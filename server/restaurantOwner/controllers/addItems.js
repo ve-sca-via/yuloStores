@@ -1,11 +1,12 @@
 import logger from '../../utils/logger.js';
 import Restaurant from '../../models/restaurant.js';
 import RestaurantOwner from '../../models/restaurantOwner.js';
+import { getLoggedInOwnerId } from '../../utils/restaurantOwnerSession.js';
 
 async function registerRestaurants(request, reply) {
   try {
     const reqBody = request.body ?? {};
-    const ownerId = reqBody.ownerId?.trim?.() ?? reqBody.ownerId;
+    const ownerId = reqBody.ownerId?.trim?.() ?? reqBody.ownerId ?? (await getLoggedInOwnerId());
     const name = reqBody.name?.trim();
 
     if (!ownerId || !name) {
@@ -13,7 +14,7 @@ async function registerRestaurants(request, reply) {
 
       return reply.code(400).send({
         status: 'error',
-        message: 'ownerId and restaurant name are required',
+        message: 'restaurant name and a logged-in owner are required',
       });
     }
 
@@ -73,21 +74,44 @@ async function registerRestaurants(request, reply) {
 async function addItems(request, reply) {
   try {
     const reqBody = request.body ?? {};
-    const ownerId = reqBody.ownerId?.trim?.() ?? reqBody.ownerId;
-    const title = reqBody.title?.trim();
-    const ingredients = Array.isArray(reqBody.ingredients)
-      ? reqBody.ingredients
-          .map((ingredient) => (typeof ingredient === 'string' ? ingredient.trim() : ''))
-          .filter(Boolean)
-      : [];
-    const price = Number(reqBody.price);
+    const ownerId = reqBody.ownerId?.trim?.() ?? reqBody.ownerId ?? (await getLoggedInOwnerId());
+    const inputRecipes = Array.isArray(reqBody.recipes)
+      ? reqBody.recipes
+      : [
+          {
+            title: reqBody.title,
+            ingredients: reqBody.ingredients,
+            price: reqBody.price,
+          },
+        ];
+    const recipes = inputRecipes
+      .map((recipe) => {
+        const title = recipe?.title?.trim?.();
+        const ingredients = Array.isArray(recipe?.ingredients)
+          ? recipe.ingredients
+              .map((ingredient) => (typeof ingredient === 'string' ? ingredient.trim() : ''))
+              .filter(Boolean)
+          : [];
+        const price = Number(recipe?.price);
 
-    if (!ownerId || !title || Number.isNaN(price)) {
-      logger.warn('Add item failed: missing ownerId, title or valid price');
+        if (!title || Number.isNaN(price)) {
+          return null;
+        }
+
+        return {
+          title,
+          ingredients,
+          price,
+        };
+      })
+      .filter(Boolean);
+
+    if (!ownerId || recipes.length === 0) {
+      logger.warn('Add item failed: missing logged-in owner or valid recipes');
 
       return reply.code(400).send({
         status: 'error',
-        message: 'ownerId, title and valid price are required',
+        message: 'at least one valid recipe and a logged-in owner are required',
       });
     }
 
@@ -122,38 +146,33 @@ async function addItems(request, reply) {
       });
     }
 
-    const item = {
-      title,
-      ingredients,
-      price,
-    };
-
     const updatedRestaurant = await Restaurant.findByIdAndUpdate(
       restaurant._id,
       {
         $push: {
-          recipies: item,
+          recipies: {
+            $each: recipes,
+          },
         },
       },
       {
         new: true,
       },
     );
-
-    const createdItem = updatedRestaurant?.recipies[updatedRestaurant.recipies.length - 1];
+    const createdItems = updatedRestaurant?.recipies.slice(-recipes.length) ?? [];
 
     logger.info(`Item added successfully to restaurant: ${restaurant._id}`);
 
     return reply.code(201).send({
       status: 'success',
-      message: 'Item added successfully',
+      message: 'Recipes added successfully',
       data: {
-        item: {
-          id: createdItem._id,
-          title: createdItem.title,
-          ingredients: createdItem.ingredients,
-          price: createdItem.price,
-        },
+        items: createdItems.map((item) => ({
+          id: item._id,
+          title: item.title,
+          ingredients: item.ingredients,
+          price: item.price,
+        })),
         restaurantId: restaurant._id,
         totalItems: updatedRestaurant?.recipies.length ?? 0,
       },

@@ -1,11 +1,15 @@
+import 'dotenv/config';
 import fastify from 'fastify';
 import restaurantOwnerRoutes from './restaurantOwner/restaurantRoutes.js';
 import logger from './utils/logger.js';
+import { mongoConnect } from './config/mongoConnector.js';
 
 const app = fastify({
   logger: true,
 });
 
+
+await mongoConnect();
 app.get('/', async () => {
   return { message: 'Server is running' };
 });

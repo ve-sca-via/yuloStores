@@ -1,5 +1,6 @@
 import logger from '../../utils/logger.js';
 import RestaurantOwner from '../../models/restaurantOwner.js';
+import { saveLoggedInOwnerId } from '../../utils/restaurantOwnerSession.js';
 
 async function restaurentOwnerSignup(request, reply) {
   try {
@@ -84,6 +85,8 @@ async function restaurentOwnerLogin(request, reply) {
       });
     }
 
+    await saveLoggedInOwnerId(owner._id.toString());
+
     logger.info(`Restaurant owner login attempt for email: ${email}`);
 
     return reply.code(200).send({
@@ -95,6 +98,9 @@ async function restaurentOwnerLogin(request, reply) {
           name: owner.name,
           email: owner.email,
           restaurant: owner.restaurant,
+        },
+        session: {
+          ownerId: owner._id,
         },
       },
     });
