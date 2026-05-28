@@ -7,17 +7,16 @@ import { addItems, registerRestaurants } from "./controllers/addItems.js";
 import { generateQr } from "./controllers/qrGeneration.js";
 import {
   getRestaurantMenu,
-  serveMenuCss,
-  serveMenuHtml,
-  serveMenuJs,
+  serveClientApp,
+  serveClientAsset,
 } from "./controllers/menu.js";
 import { createOrder, getOrdersByRestaurant } from "./controllers/orders.js";
 
 const restaurantOwnerRoutes = (app) => {
   app.get("/health", serverHealth);
-  app.get("/menu", serveMenuHtml);
-  app.get("/menu/index.css", serveMenuCss);
-  app.get("/menu/index.js", serveMenuJs);
+  app.get("/assets/*", serveClientAsset);
+  app.get("/menu", serveClientApp);
+  app.get("/owner", serveClientApp);
   app.get("/api/restaurants/:restaurantId/menu", getRestaurantMenu);
   app.get("/api/orders", getOrdersByRestaurant);
   app.get("/restaurant_owner/orders", getOrdersByRestaurant);

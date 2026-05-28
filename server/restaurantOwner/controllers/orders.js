@@ -13,13 +13,18 @@ function normalizeRequestedItems(items) {
       return null;
     }
 
-    quantityByRecipeId.set(recipeId, (quantityByRecipeId.get(recipeId) ?? 0) + quantity);
+    quantityByRecipeId.set(
+      recipeId,
+      (quantityByRecipeId.get(recipeId) ?? 0) + quantity,
+    );
   }
 
-  return Array.from(quantityByRecipeId.entries()).map(([recipeId, quantity]) => ({
-    recipeId,
-    quantity,
-  }));
+  return Array.from(quantityByRecipeId.entries()).map(
+    ([recipeId, quantity]) => ({
+      recipeId,
+      quantity,
+    }),
+  );
 }
 
 async function createOrder(request, reply) {

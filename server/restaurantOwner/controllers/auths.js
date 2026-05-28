@@ -1,6 +1,6 @@
-import logger from '../../utils/logger.js';
-import RestaurantOwner from '../../models/restaurantOwner.js';
-import { saveLoggedInOwnerId } from '../../utils/restaurantOwnerSession.js';
+import logger from "../../utils/logger.js";
+import RestaurantOwner from "../../models/restaurantOwner.js";
+import { saveLoggedInOwnerId } from "../../utils/restaurantOwnerSession.js";
 
 async function restaurentOwnerSignup(request, reply) {
   try {
@@ -10,22 +10,24 @@ async function restaurentOwnerSignup(request, reply) {
     const password = reqBody.password;
 
     if (!name || !email || !password) {
-      logger.warn('Restaurant owner signup failed: missing required fields');
+      logger.warn("Restaurant owner signup failed: missing required fields");
 
       return reply.code(400).send({
-        status: 'error',
-        message: 'Name, email and password are required',
+        status: "error",
+        message: "Name, email and password are required",
       });
     }
 
     const existingOwner = await RestaurantOwner.findOne({ email });
 
     if (existingOwner) {
-      logger.warn(`Restaurant owner signup failed: email already exists ${email}`);
+      logger.warn(
+        `Restaurant owner signup failed: email already exists ${email}`,
+      );
 
       return reply.code(409).send({
-        status: 'error',
-        message: 'Restaurant owner already exists with this email',
+        status: "error",
+        message: "Restaurant owner already exists with this email",
       });
     }
 
@@ -38,8 +40,8 @@ async function restaurentOwnerSignup(request, reply) {
     logger.info(`Restaurant owner signup successful for email: ${email}`);
 
     return reply.code(201).send({
-      status: 'success',
-      message: 'Restaurant owner created successfully',
+      status: "success",
+      message: "Restaurant owner created successfully",
       data: {
         owner: {
           id: owner._id,
@@ -53,8 +55,8 @@ async function restaurentOwnerSignup(request, reply) {
     logger.error(`Error from restaurentOwnerSignup: ${error.message}`);
 
     return reply.code(500).send({
-      status: 'error',
-      message: 'Unable to create restaurant owner',
+      status: "error",
+      message: "Unable to create restaurant owner",
     });
   }
 }
@@ -66,22 +68,24 @@ async function restaurentOwnerLogin(request, reply) {
     const password = reqBody.password;
 
     if (!email || !password) {
-      logger.warn('Restaurant owner login failed: missing email or password');
+      logger.warn("Restaurant owner login failed: missing email or password");
 
       return reply.code(400).send({
-        status: 'error',
-        message: 'Email and password are required',
+        status: "error",
+        message: "Email and password are required",
       });
     }
 
-    const owner = await RestaurantOwner.findOne({ email }).populate('restaurant');
+    const owner = await RestaurantOwner.findOne({ email }).populate(
+      "restaurant",
+    );
 
     if (!owner || owner.password !== password) {
       logger.warn(`Restaurant owner login failed for email: ${email}`);
 
       return reply.code(401).send({
-        status: 'error',
-        message: 'Invalid email or password',
+        status: "error",
+        message: "Invalid email or password",
       });
     }
 
@@ -90,8 +94,8 @@ async function restaurentOwnerLogin(request, reply) {
     logger.info(`Restaurant owner login attempt for email: ${email}`);
 
     return reply.code(200).send({
-      status: 'success',
-      message: 'Login successful',
+      status: "success",
+      message: "Login successful",
       data: {
         owner: {
           id: owner._id,
@@ -108,8 +112,8 @@ async function restaurentOwnerLogin(request, reply) {
     logger.error(`Error from restaurantOwnerLogin: ${error.message}`);
 
     return reply.code(500).send({
-      status: 'error',
-      message: 'Unable to login restaurant owner',
+      status: "error",
+      message: "Unable to login restaurant owner",
     });
   }
 }

@@ -27,8 +27,16 @@ body::before {
   position: fixed;
   inset: 0;
   background:
-    radial-gradient(circle at top left, rgba(255, 255, 255, 0.45), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(255, 255, 255, 0.35), transparent 22%);
+    radial-gradient(
+      circle at top left,
+      rgba(255, 255, 255, 0.45),
+      transparent 28%
+    ),
+    radial-gradient(
+      circle at bottom right,
+      rgba(255, 255, 255, 0.35),
+      transparent 22%
+    );
   pointer-events: none;
 }
 

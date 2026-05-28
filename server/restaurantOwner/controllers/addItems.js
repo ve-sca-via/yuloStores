@@ -1,40 +1,48 @@
-import logger from '../../utils/logger.js';
-import Restaurant from '../../models/restaurant.js';
-import RestaurantOwner from '../../models/restaurantOwner.js';
-import { getLoggedInOwnerId } from '../../utils/restaurantOwnerSession.js';
+import logger from "../../utils/logger.js";
+import Restaurant from "../../models/restaurant.js";
+import RestaurantOwner from "../../models/restaurantOwner.js";
+import { getLoggedInOwnerId } from "../../utils/restaurantOwnerSession.js";
 
 async function registerRestaurants(request, reply) {
   try {
     const reqBody = request.body ?? {};
-    const ownerId = reqBody.ownerId?.trim?.() ?? reqBody.ownerId ?? (await getLoggedInOwnerId());
+    const ownerId =
+      reqBody.ownerId?.trim?.() ??
+      reqBody.ownerId ??
+      (await getLoggedInOwnerId());
     const name = reqBody.name?.trim();
 
     if (!ownerId || !name) {
-      logger.warn('Restaurant registration failed: missing ownerId or restaurant name');
+      logger.warn(
+        "Restaurant registration failed: missing ownerId or restaurant name",
+      );
 
       return reply.code(400).send({
-        status: 'error',
-        message: 'restaurant name and a logged-in owner are required',
+        status: "error",
+        message: "restaurant name and a logged-in owner are required",
       });
     }
 
-    const owner = await RestaurantOwner.findById(ownerId).populate('restaurant');
+    const owner =
+      await RestaurantOwner.findById(ownerId).populate("restaurant");
 
     if (!owner) {
       logger.warn(`Restaurant registration failed: owner not found ${ownerId}`);
 
       return reply.code(404).send({
-        status: 'error',
-        message: 'Restaurant owner not found',
+        status: "error",
+        message: "Restaurant owner not found",
       });
     }
 
     if (owner.restaurant) {
-      logger.warn(`Restaurant registration failed: owner already has restaurant ${ownerId}`);
+      logger.warn(
+        `Restaurant registration failed: owner already has restaurant ${ownerId}`,
+      );
 
       return reply.code(409).send({
-        status: 'error',
-        message: 'Restaurant already registered for this owner',
+        status: "error",
+        message: "Restaurant already registered for this owner",
       });
     }
 
@@ -50,8 +58,8 @@ async function registerRestaurants(request, reply) {
     logger.info(`Restaurant registered successfully for owner: ${owner.email}`);
 
     return reply.code(201).send({
-      status: 'success',
-      message: 'Restaurant registered successfully',
+      status: "success",
+      message: "Restaurant registered successfully",
       data: {
         restaurant: {
           id: restaurant._id,
@@ -65,8 +73,8 @@ async function registerRestaurants(request, reply) {
     logger.error(`Error from registerRestaurants function: ${error.message}`);
 
     return reply.code(500).send({
-      status: 'error',
-      message: 'Unable to register restaurant',
+      status: "error",
+      message: "Unable to register restaurant",
     });
   }
 }
@@ -74,7 +82,10 @@ async function registerRestaurants(request, reply) {
 async function addItems(request, reply) {
   try {
     const reqBody = request.body ?? {};
-    const ownerId = reqBody.ownerId?.trim?.() ?? reqBody.ownerId ?? (await getLoggedInOwnerId());
+    const ownerId =
+      reqBody.ownerId?.trim?.() ??
+      reqBody.ownerId ??
+      (await getLoggedInOwnerId());
     const inputRecipes = Array.isArray(reqBody.recipes)
       ? reqBody.recipes
       : [
@@ -89,7 +100,9 @@ async function addItems(request, reply) {
         const title = recipe?.title?.trim?.();
         const ingredients = Array.isArray(recipe?.ingredients)
           ? recipe.ingredients
-              .map((ingredient) => (typeof ingredient === 'string' ? ingredient.trim() : ''))
+              .map((ingredient) =>
+                typeof ingredient === "string" ? ingredient.trim() : "",
+              )
               .filter(Boolean)
           : [];
         const price = Number(recipe?.price);
@@ -107,11 +120,11 @@ async function addItems(request, reply) {
       .filter(Boolean);
 
     if (!ownerId || recipes.length === 0) {
-      logger.warn('Add item failed: missing logged-in owner or valid recipes');
+      logger.warn("Add item failed: missing logged-in owner or valid recipes");
 
       return reply.code(400).send({
-        status: 'error',
-        message: 'at least one valid recipe and a logged-in owner are required',
+        status: "error",
+        message: "at least one valid recipe and a logged-in owner are required",
       });
     }
 
@@ -121,17 +134,19 @@ async function addItems(request, reply) {
       logger.warn(`Add item failed: owner not found ${ownerId}`);
 
       return reply.code(404).send({
-        status: 'error',
-        message: 'Restaurant owner not found',
+        status: "error",
+        message: "Restaurant owner not found",
       });
     }
 
     if (!owner.restaurant) {
-      logger.warn(`Add item failed: no restaurant registered for owner ${ownerId}`);
+      logger.warn(
+        `Add item failed: no restaurant registered for owner ${ownerId}`,
+      );
 
       return reply.code(404).send({
-        status: 'error',
-        message: 'Restaurant not registered for this owner',
+        status: "error",
+        message: "Restaurant not registered for this owner",
       });
     }
 
@@ -141,8 +156,8 @@ async function addItems(request, reply) {
       logger.warn(`Add item failed: restaurant not found for owner ${ownerId}`);
 
       return reply.code(404).send({
-        status: 'error',
-        message: 'Restaurant not found',
+        status: "error",
+        message: "Restaurant not found",
       });
     }
 
@@ -159,13 +174,14 @@ async function addItems(request, reply) {
         new: true,
       },
     );
-    const createdItems = updatedRestaurant?.recipies.slice(-recipes.length) ?? [];
+    const createdItems =
+      updatedRestaurant?.recipies.slice(-recipes.length) ?? [];
 
     logger.info(`Item added successfully to restaurant: ${restaurant._id}`);
 
     return reply.code(201).send({
-      status: 'success',
-      message: 'Recipes added successfully',
+      status: "success",
+      message: "Recipes added successfully",
       data: {
         items: createdItems.map((item) => ({
           id: item._id,
@@ -181,8 +197,8 @@ async function addItems(request, reply) {
     logger.error(`Error from addItems function: ${error.message}`);
 
     return reply.code(500).send({
-      status: 'error',
-      message: 'Unable to add item to restaurant',
+      status: "error",
+      message: "Unable to add item to restaurant",
     });
   }
 }
