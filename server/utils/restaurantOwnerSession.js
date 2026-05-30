@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -33,4 +33,12 @@ async function getLoggedInOwnerId() {
   }
 }
 
-export { getLoggedInOwnerId, saveLoggedInOwnerId };
+async function clearLoggedInOwnerId() {
+  try {
+    await rm(sessionFilePath, { force: true });
+  } catch (_error) {
+    // Ignore missing session file
+  }
+}
+
+export { clearLoggedInOwnerId, getLoggedInOwnerId, saveLoggedInOwnerId };

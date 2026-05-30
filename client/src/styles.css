@@ -50,7 +50,8 @@ a {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -260,6 +261,17 @@ h3 {
   color: var(--text);
 }
 
+.stack-form select,
+.movement-box input,
+.movement-box select {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.68);
+  border-radius: 16px;
+  padding: 14px 16px;
+  color: var(--text);
+}
+
 .primary-button,
 .secondary-button,
 .link-button {
@@ -335,6 +347,38 @@ h3 {
   margin: 0;
   color: var(--muted);
   line-height: 1.5;
+}
+
+.analytics-card {
+  padding: 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.analytics-card strong {
+  font-size: 1.6rem;
+  font-family: "Fraunces", serif;
+}
+
+.analytics-grid,
+.analytics-columns,
+.settings-grid {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.analytics-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.analytics-columns,
+.settings-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.analytics-list-card {
+  padding: 18px;
 }
 
 .metric-label {
@@ -435,6 +479,16 @@ h3 {
   justify-content: start;
 }
 
+.movement-box,
+.order-progress-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.movement-box {
+  width: 100%;
+}
+
 .inventory-editor {
   width: 100%;
 }
@@ -526,6 +580,34 @@ h3 {
   color: var(--accent);
   font-weight: 800;
   white-space: nowrap;
+}
+
+.expense-amount {
+  background: rgba(140, 47, 29, 0.08);
+  color: #8c2f1d;
+}
+
+.tag-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.muted-tag {
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .stock-chip {
@@ -669,6 +751,21 @@ h3 {
   width: 100%;
 }
 
+.order-status-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.64);
+  border: 1px solid var(--border);
+}
+
+.progress-button {
+  text-transform: capitalize;
+}
+
 .landing-card {
   min-height: 420px;
   align-content: center;
@@ -693,6 +790,10 @@ h3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .analytics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .owner-grid,
   .content-grid {
     grid-template-columns: 1fr;
@@ -708,6 +809,11 @@ h3 {
 
   .inventory-card-side {
     justify-items: start;
+  }
+
+  .analytics-columns,
+  .settings-grid {
+    grid-template-columns: 1fr;
   }
 
   .qr-card {
@@ -727,6 +833,10 @@ h3 {
   }
 
   .owner-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-grid {
     grid-template-columns: 1fr;
   }
 

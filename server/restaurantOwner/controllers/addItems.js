@@ -1,7 +1,26 @@
 import logger from "../../utils/logger.js";
+import Expense from "../../models/expenses.js";
 import Restaurant from "../../models/restaurant.js";
 import RestaurantOwner from "../../models/restaurantOwner.js";
 import { getLoggedInOwnerId } from "../../utils/restaurantOwnerSession.js";
+
+async function getOwnerAndRestaurant(ownerId) {
+  const owner = await RestaurantOwner.findById(ownerId);
+
+  if (!owner?.restaurant) {
+    return {
+      owner,
+      restaurant: null,
+    };
+  }
+
+  const restaurant = await Restaurant.findById(owner.restaurant);
+
+  return {
+    owner,
+    restaurant,
+  };
+}
 
 async function registerRestaurants(request, reply) {
   try {
@@ -204,6 +223,199 @@ async function addItems(request, reply) {
   }
 }
 
+async function updateRestaurant(request, reply) {
+  try {
+    const ownerId =
+      request.body?.ownerId?.trim?.() ??
+      request.body?.ownerId ??
+      (await getLoggedInOwnerId());
+    const name = request.body?.name?.trim();
+
+    if (!ownerId || !name) {
+      return reply.code(400).send({
+        status: "error",
+        message: "ownerId and restaurant name are required",
+      });
+    }
+
+    const { owner, restaurant } = await getOwnerAndRestaurant(ownerId);
+
+    if (!owner) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant owner not found",
+      });
+    }
+
+    if (!restaurant) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant not registered for this owner",
+      });
+    }
+
+    restaurant.name = name;
+    await restaurant.save();
+
+    return reply.send({
+      status: "success",
+      message: "Restaurant updated successfully",
+      data: {
+        restaurant: {
+          id: restaurant._id,
+          name: restaurant.name,
+          owner: restaurant.owner,
+        },
+      },
+    });
+  } catch (error) {
+    logger.error(`Error from updateRestaurant: ${error.message}`);
+
+    return reply.code(500).send({
+      status: "error",
+      message: "Unable to update restaurant",
+    });
+  }
+}
+
+async function updateMenuItem(request, reply) {
+  try {
+    const itemId = request.params.itemId?.toString?.().trim();
+    const ownerId =
+      request.body?.ownerId?.trim?.() ??
+      request.body?.ownerId ??
+      (await getLoggedInOwnerId());
+    const title = request.body?.title?.trim?.();
+    const ingredients = Array.isArray(request.body?.ingredients)
+      ? request.body.ingredients
+          .map((ingredient) =>
+            typeof ingredient === "string" ? ingredient.trim() : "",
+          )
+          .filter(Boolean)
+      : [];
+    const price = Number(request.body?.price);
+
+    if (!itemId || !ownerId || !title || Number.isNaN(price)) {
+      return reply.code(400).send({
+        status: "error",
+        message: "itemId, ownerId, title and valid price are required",
+      });
+    }
+
+    const { owner, restaurant } = await getOwnerAndRestaurant(ownerId);
+
+    if (!owner) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant owner not found",
+      });
+    }
+
+    if (!restaurant) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant not registered for this owner",
+      });
+    }
+
+    const recipe = restaurant.recipies.id(itemId);
+
+    if (!recipe) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Menu item not found",
+      });
+    }
+
+    recipe.title = title;
+    recipe.ingredients = ingredients;
+    recipe.price = price;
+    await restaurant.save();
+
+    return reply.send({
+      status: "success",
+      message: "Menu item updated successfully",
+      data: {
+        item: {
+          id: recipe._id,
+          title: recipe.title,
+          ingredients: recipe.ingredients,
+          price: recipe.price,
+        },
+        restaurantId: restaurant._id,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error from updateMenuItem: ${error.message}`);
+
+    return reply.code(500).send({
+      status: "error",
+      message: "Unable to update menu item",
+    });
+  }
+}
+
+async function deleteMenuItem(request, reply) {
+  try {
+    const itemId = request.params.itemId?.toString?.().trim();
+    const ownerId =
+      request.body?.ownerId?.trim?.() ??
+      request.body?.ownerId ??
+      (await getLoggedInOwnerId());
+
+    if (!itemId || !ownerId) {
+      return reply.code(400).send({
+        status: "error",
+        message: "itemId and ownerId are required",
+      });
+    }
+
+    const { owner, restaurant } = await getOwnerAndRestaurant(ownerId);
+
+    if (!owner) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant owner not found",
+      });
+    }
+
+    if (!restaurant) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant not registered for this owner",
+      });
+    }
+
+    const recipe = restaurant.recipies.id(itemId);
+
+    if (!recipe) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Menu item not found",
+      });
+    }
+
+    recipe.deleteOne();
+    await restaurant.save();
+
+    return reply.send({
+      status: "success",
+      message: "Menu item deleted successfully",
+      data: {
+        restaurantId: restaurant._id,
+        totalItems: restaurant.recipies.length,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error from deleteMenuItem: ${error.message}`);
+
+    return reply.code(500).send({
+      status: "error",
+      message: "Unable to delete menu item",
+    });
+  }
+}
+
 async function addInventory(request, reply) {
   try {
     const reqBody = request.body ?? {};
@@ -391,6 +603,240 @@ async function getInventory(request, reply) {
   }
 }
 
+async function addExpense(request, reply) {
+  try {
+    const reqBody = request.body ?? {};
+    const ownerId =
+      reqBody.ownerId?.trim?.() ??
+      reqBody.ownerId ??
+      (await getLoggedInOwnerId());
+    const title = reqBody.title?.trim?.() || reqBody.name?.trim?.();
+    const amount = Number(reqBody.amount);
+    const note = reqBody.note?.toString?.().trim() ?? "";
+    const tags = Array.isArray(reqBody.tags)
+      ? reqBody.tags
+          .map((tag) => (typeof tag === "string" ? tag.trim() : ""))
+          .filter(Boolean)
+      : (reqBody.tags ?? "")
+          .toString()
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean);
+    const fallbackTag = reqBody.tag?.toString?.().trim() ?? "";
+    const normalizedTags =
+      tags.length > 0 ? tags : fallbackTag ? [fallbackTag] : [];
+
+    if (!ownerId || !title || !Number.isFinite(amount) || amount < 0) {
+      return reply.code(400).send({
+        status: "error",
+        message: "ownerId, title and a valid amount are required",
+      });
+    }
+
+    const { owner, restaurant } = await getOwnerAndRestaurant(ownerId);
+
+    if (!owner) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant owner not found",
+      });
+    }
+
+    if (!restaurant) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant not registered for this owner",
+      });
+    }
+
+    const expense = await Expense.create({
+      restaurant_id: restaurant._id,
+      title,
+      amount,
+      tag: normalizedTags[0] ?? "",
+      tags: normalizedTags,
+      note,
+    });
+
+    return reply.code(201).send({
+      status: "success",
+      message: "Expense added successfully",
+      data: {
+        expense: {
+          id: expense._id,
+          restaurant_id: expense.restaurant_id,
+          title: expense.title,
+          amount: expense.amount,
+          tag: expense.tag ?? expense.tags?.[0] ?? "",
+          tags: expense.tags ?? (expense.tag ? [expense.tag] : []),
+          note: expense.note ?? "",
+          time: expense.time,
+        },
+        restaurantId: restaurant._id,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error from addExpense: ${error.message}`);
+
+    return reply.code(500).send({
+      status: "error",
+      message: "Unable to add expense",
+    });
+  }
+}
+
+async function getExpenses(request, reply) {
+  try {
+    const restaurantId =
+      request.query.restaurant_id?.toString?.().trim() ??
+      request.query.restaurantId?.toString?.().trim();
+
+    if (!restaurantId) {
+      return reply.code(400).send({
+        status: "error",
+        message: "restaurant_id query parameter is required",
+      });
+    }
+
+    const restaurant = await Restaurant.findById(restaurantId).lean();
+
+    if (!restaurant) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant not found",
+      });
+    }
+
+    const [storedExpenses, legacyExpenses] = await Promise.all([
+      Expense.find({ restaurant_id: restaurantId }).sort({ time: -1 }).lean(),
+      Promise.resolve(restaurant.expenses ?? []),
+    ]);
+
+    const expenses = [
+      ...storedExpenses.map((expense) => ({
+        id: expense._id,
+        restaurant_id: expense.restaurant_id,
+        title: expense.title,
+        amount: expense.amount,
+        tag: expense.tag ?? expense.tags?.[0] ?? "",
+        tags: expense.tags ?? (expense.tag ? [expense.tag] : []),
+        note: expense.note ?? "",
+        time: expense.time,
+      })),
+      ...legacyExpenses.map((expense) => ({
+        id: expense._id,
+        restaurant_id: restaurant._id,
+        title: expense.title,
+        amount: expense.amount,
+        tag: expense.tags?.[0] ?? "",
+        tags: expense.tags ?? [],
+        note: expense.note ?? "",
+        time: expense.createdAt,
+      })),
+    ].sort((left, right) => new Date(right.time) - new Date(left.time));
+
+    return reply.send({
+      status: "success",
+      data: {
+        restaurant: {
+          id: restaurant._id,
+          name: restaurant.name,
+        },
+        totalExpenses: expenses.length,
+        expenses,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error from getExpenses: ${error.message}`);
+
+    return reply.code(500).send({
+      status: "error",
+      message: "Unable to fetch expenses",
+    });
+  }
+}
+
+async function deleteExpense(request, reply) {
+  try {
+    const expenseId = request.params.expenseId?.toString?.().trim();
+    const ownerId =
+      request.body?.ownerId?.trim?.() ??
+      request.body?.ownerId ??
+      (await getLoggedInOwnerId());
+
+    if (!expenseId || !ownerId) {
+      return reply.code(400).send({
+        status: "error",
+        message: "ownerId and expenseId are required",
+      });
+    }
+
+    const { owner, restaurant } = await getOwnerAndRestaurant(ownerId);
+
+    if (!owner) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant owner not found",
+      });
+    }
+
+    if (!restaurant) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant not registered for this owner",
+      });
+    }
+
+    const deletedExpense = await Expense.findOneAndDelete({
+      _id: expenseId,
+      restaurant_id: restaurant._id,
+    });
+
+    if (deletedExpense) {
+      const totalExpenses = await Expense.countDocuments({
+        restaurant_id: restaurant._id,
+      });
+
+      return reply.send({
+        status: "success",
+        message: "Expense deleted successfully",
+        data: {
+          restaurantId: restaurant._id,
+          totalExpenses,
+        },
+      });
+    }
+
+    const legacyExpense = restaurant.expenses.id(expenseId);
+
+    if (!legacyExpense) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Expense not found",
+      });
+    }
+
+    legacyExpense.deleteOne();
+    await restaurant.save();
+
+    return reply.send({
+      status: "success",
+      message: "Expense deleted successfully",
+      data: {
+        restaurantId: restaurant._id,
+        totalExpenses: restaurant.expenses.length,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error from deleteExpense: ${error.message}`);
+
+    return reply.code(500).send({
+      status: "error",
+      message: "Unable to delete expense",
+    });
+  }
+}
+
 async function updateInventoryItem(request, reply) {
   try {
     const inventoryId = request.params.inventoryId?.toString?.().trim();
@@ -548,11 +994,265 @@ async function deleteInventoryItem(request, reply) {
   }
 }
 
+async function addInventoryMovement(request, reply) {
+  try {
+    const inventoryId = request.params.inventoryId?.toString?.().trim();
+    const ownerId =
+      request.body?.ownerId?.trim?.() ??
+      request.body?.ownerId ??
+      (await getLoggedInOwnerId());
+    const type = request.body?.type?.toString?.().trim();
+    const quantity = Number(request.body?.quantity);
+    const note = request.body?.note?.toString?.().trim() ?? "";
+
+    if (!inventoryId || !ownerId || !type || !Number.isFinite(quantity) || quantity <= 0) {
+      return reply.code(400).send({
+        status: "error",
+        message: "inventoryId, ownerId, type and positive quantity are required",
+      });
+    }
+
+    const { owner, restaurant } = await getOwnerAndRestaurant(ownerId);
+
+    if (!owner) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant owner not found",
+      });
+    }
+
+    if (!restaurant) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant not registered for this owner",
+      });
+    }
+
+    const inventoryItem = restaurant.inventory.id(inventoryId);
+
+    if (!inventoryItem) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Inventory item not found",
+      });
+    }
+
+    const direction = type === "restock" ? 1 : -1;
+    const resultingQuantity = inventoryItem.quantity + direction * quantity;
+
+    if (resultingQuantity < 0) {
+      return reply.code(400).send({
+        status: "error",
+        message: "Movement would reduce stock below zero",
+      });
+    }
+
+    inventoryItem.quantity = resultingQuantity;
+    inventoryItem.available = resultingQuantity > 0;
+    restaurant.inventoryMovements.push({
+      inventory_id: inventoryItem._id,
+      inventoryName: inventoryItem.name,
+      type,
+      quantityChange: direction * quantity,
+      resultingQuantity,
+      unit: inventoryItem.unit || "kg",
+      price: inventoryItem.price,
+      note,
+    });
+    await restaurant.save();
+
+    return reply.send({
+      status: "success",
+      message: "Inventory movement recorded successfully",
+      data: {
+        item: {
+          id: inventoryItem._id,
+          quantity: inventoryItem.quantity,
+          available: inventoryItem.available,
+        },
+        restaurantId: restaurant._id,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error from addInventoryMovement: ${error.message}`);
+
+    return reply.code(500).send({
+      status: "error",
+      message: "Unable to record inventory movement",
+    });
+  }
+}
+
+async function getRestaurantAnalytics(request, reply) {
+  try {
+    const restaurantId =
+      request.query.restaurant_id?.toString?.().trim() ??
+      request.query.restaurantId?.toString?.().trim();
+
+    if (!restaurantId) {
+      return reply.code(400).send({
+        status: "error",
+        message: "restaurant_id query parameter is required",
+      });
+    }
+
+    const restaurant = await Restaurant.findById(restaurantId).lean();
+
+    if (!restaurant) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant not found",
+      });
+    }
+
+    const Order = (await import("../../models/orders.js")).default;
+    const paidOrders = await Order.find({
+      restaurant_id: restaurantId,
+      paymentStatus: "paid",
+    }).lean();
+
+    const totalRevenue = paidOrders.reduce(
+      (sum, order) => sum + (order.totalPrice ?? 0),
+      0,
+    );
+    const totalPaidOrders = paidOrders.length;
+    const inventoryCost = (restaurant.inventory ?? []).reduce(
+      (sum, item) => sum + (item.quantity ?? 0) * (item.price ?? 0),
+      0,
+    );
+    const [storedExpenses, legacyExpenses] = await Promise.all([
+      Expense.find({ restaurant_id: restaurantId }).lean(),
+      Promise.resolve(restaurant.expenses ?? []),
+    ]);
+    const normalizedExpenses = [
+      ...storedExpenses.map((expense) => ({
+        id: expense._id,
+        title: expense.title,
+        amount: expense.amount ?? 0,
+        tag: expense.tag ?? expense.tags?.[0] ?? "",
+        tags: expense.tags ?? (expense.tag ? [expense.tag] : []),
+        note: expense.note ?? "",
+        time: expense.time,
+      })),
+      ...legacyExpenses.map((expense) => ({
+        id: expense._id,
+        title: expense.title,
+        amount: expense.amount ?? 0,
+        tag: expense.tags?.[0] ?? "",
+        tags: expense.tags ?? [],
+        note: expense.note ?? "",
+        time: expense.createdAt,
+      })),
+    ];
+    const totalExpenses = normalizedExpenses.reduce(
+      (sum, expense) => sum + expense.amount,
+      0,
+    );
+    const averageMenuPrice =
+      restaurant.recipies?.length > 0
+        ? restaurant.recipies.reduce((sum, item) => sum + (item.price ?? 0), 0) /
+          restaurant.recipies.length
+        : 0;
+    const unavailableItems = (restaurant.inventory ?? []).filter(
+      (item) => item.available === false || item.quantity <= 0,
+    );
+    const lowStockItems = (restaurant.inventory ?? []).filter(
+      (item) => item.quantity > 0 && item.quantity <= 5,
+    );
+
+    return reply.send({
+      status: "success",
+      data: {
+        summary: {
+          totalRevenue,
+          totalPaidOrders,
+          inventoryCost,
+          totalExpenses,
+          averageMenuPrice,
+          estimatedGrossMargin: totalRevenue - inventoryCost,
+          estimatedNetAfterExpenses: totalRevenue - inventoryCost - totalExpenses,
+        },
+        unavailableItems: unavailableItems.map((item) => ({
+          id: item._id,
+          name: item.name,
+          quantity: item.quantity,
+          unit: item.unit || "kg",
+        })),
+        lowStockItems: lowStockItems.map((item) => ({
+          id: item._id,
+          name: item.name,
+          quantity: item.quantity,
+          unit: item.unit || "kg",
+        })),
+        recentMovements: (restaurant.inventoryMovements ?? [])
+          .sort((left, right) => right.createdAt - left.createdAt)
+          .slice(0, 10)
+          .map((movement) => ({
+            id: movement._id,
+            inventoryName: movement.inventoryName,
+            type: movement.type,
+            quantityChange: movement.quantityChange,
+            resultingQuantity: movement.resultingQuantity,
+            unit: movement.unit,
+            note: movement.note,
+            createdAt: movement.createdAt,
+          })),
+        recentExpenses: normalizedExpenses
+          .slice()
+          .sort((left, right) => new Date(right.time) - new Date(left.time))
+          .slice(0, 10)
+          .map((expense) => ({
+            id: expense.id,
+            title: expense.title,
+            amount: expense.amount,
+            tags: expense.tags ?? [],
+            note: expense.note ?? "",
+            time: expense.time,
+          })),
+        expenseBreakdown: Object.entries(
+          normalizedExpenses.reduce((groups, expense) => {
+            const normalizedTags =
+              Array.isArray(expense.tags) && expense.tags.length > 0
+                ? expense.tags
+                : ["untagged"];
+
+            normalizedTags.forEach((tag) => {
+              groups[tag] = (groups[tag] ?? 0) + (expense.amount ?? 0);
+            });
+
+            return groups;
+          }, {}),
+        )
+          .map(([tag, amount]) => ({
+            tag,
+            amount,
+          }))
+          .sort((left, right) => right.amount - left.amount),
+      },
+    });
+  } catch (error) {
+    logger.error(`Error from getRestaurantAnalytics: ${error.message}`);
+
+    return reply.code(500).send({
+      status: "error",
+      message: "Unable to fetch analytics",
+    });
+  }
+}
+
 export {
+  addExpense,
   addInventory,
+  addInventoryMovement,
   addItems,
+  deleteExpense,
+  deleteMenuItem,
   deleteInventoryItem,
+  getExpenses,
   getInventory,
+  getRestaurantAnalytics,
   registerRestaurants,
+  updateMenuItem,
+  updateRestaurant,
   updateInventoryItem,
 };

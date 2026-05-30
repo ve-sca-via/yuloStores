@@ -1,6 +1,9 @@
 import logger from "../../utils/logger.js";
 import RestaurantOwner from "../../models/restaurantOwner.js";
-import { saveLoggedInOwnerId } from "../../utils/restaurantOwnerSession.js";
+import {
+  clearLoggedInOwnerId,
+  saveLoggedInOwnerId,
+} from "../../utils/restaurantOwnerSession.js";
 
 async function restaurentOwnerSignup(request, reply) {
   try {
@@ -118,4 +121,139 @@ async function restaurentOwnerLogin(request, reply) {
   }
 }
 
-export { restaurentOwnerLogin, restaurentOwnerSignup };
+async function getRestaurantOwnerProfile(request, reply) {
+  try {
+    const ownerId =
+      request.query.ownerId?.toString?.().trim() ?? request.params.ownerId;
+
+    if (!ownerId) {
+      return reply.code(400).send({
+        status: "error",
+        message: "ownerId is required",
+      });
+    }
+
+    const owner = await RestaurantOwner.findById(ownerId).populate("restaurant");
+
+    if (!owner) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant owner not found",
+      });
+    }
+
+    return reply.send({
+      status: "success",
+      data: {
+        owner: {
+          id: owner._id,
+          name: owner.name,
+          email: owner.email,
+          restaurant: owner.restaurant,
+        },
+      },
+    });
+  } catch (error) {
+    logger.error(`Error from getRestaurantOwnerProfile: ${error.message}`);
+
+    return reply.code(500).send({
+      status: "error",
+      message: "Unable to fetch restaurant owner profile",
+    });
+  }
+}
+
+async function updateRestaurantOwnerProfile(request, reply) {
+  try {
+    const ownerId = request.params.ownerId?.toString?.().trim();
+    const reqBody = request.body ?? {};
+    const name = reqBody.name?.trim();
+    const email = reqBody.email?.trim?.().toLowerCase();
+    const password = reqBody.password;
+
+    if (!ownerId || !name || !email) {
+      return reply.code(400).send({
+        status: "error",
+        message: "ownerId, name and email are required",
+      });
+    }
+
+    const existingOwner = await RestaurantOwner.findOne({
+      email,
+      _id: { $ne: ownerId },
+    });
+
+    if (existingOwner) {
+      return reply.code(409).send({
+        status: "error",
+        message: "Another restaurant owner already uses this email",
+      });
+    }
+
+    const update = {
+      name,
+      email,
+    };
+
+    if (password?.length) {
+      update.password = password;
+    }
+
+    const owner = await RestaurantOwner.findByIdAndUpdate(ownerId, update, {
+      new: true,
+    }).populate("restaurant");
+
+    if (!owner) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant owner not found",
+      });
+    }
+
+    return reply.send({
+      status: "success",
+      message: "Owner profile updated successfully",
+      data: {
+        owner: {
+          id: owner._id,
+          name: owner.name,
+          email: owner.email,
+          restaurant: owner.restaurant,
+        },
+      },
+    });
+  } catch (error) {
+    logger.error(`Error from updateRestaurantOwnerProfile: ${error.message}`);
+
+    return reply.code(500).send({
+      status: "error",
+      message: "Unable to update restaurant owner profile",
+    });
+  }
+}
+
+async function restaurantOwnerLogout(_request, reply) {
+  try {
+    await clearLoggedInOwnerId();
+
+    return reply.send({
+      status: "success",
+      message: "Logout successful",
+    });
+  } catch (error) {
+    logger.error(`Error from restaurantOwnerLogout: ${error.message}`);
+
+    return reply.code(500).send({
+      status: "error",
+      message: "Unable to logout restaurant owner",
+    });
+  }
+}
+
+export {
+  getRestaurantOwnerProfile,
+  restaurentOwnerLogin,
+  restaurentOwnerSignup,
+  restaurantOwnerLogout,
+  updateRestaurantOwnerProfile,
+};
