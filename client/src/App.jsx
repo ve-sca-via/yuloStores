@@ -258,11 +258,27 @@ function OwnerPortalPage() {
     ingredients: "",
     price: "",
   });
+  const [inventoryForm, setInventoryForm] = useState({
+    name: "",
+    quantity: "",
+    unit: "kg",
+    price: "",
+    available: true,
+  });
+  const [editingInventoryId, setEditingInventoryId] = useState(null);
+  const [inventoryEditForm, setInventoryEditForm] = useState({
+    name: "",
+    quantity: "",
+    unit: "kg",
+    price: "",
+    available: true,
+  });
   const [qrForm, setQrForm] = useState({
     tableNumber: "",
     baseUrl: typeof window !== "undefined" ? window.location.origin : "",
   });
   const [menuItems, setMenuItems] = useState([]);
+  const [inventoryItems, setInventoryItems] = useState([]);
   const [ordersData, setOrdersData] = useState({ totalOrders: 0, orders: [] });
   const [portalStatus, setPortalStatus] = useState("Waiting for owner actions");
   const [qrData, setQrData] = useState(null);
@@ -290,6 +306,17 @@ function OwnerPortalPage() {
     });
   }
 
+  async function refreshInventory(restaurantId) {
+    if (!restaurantId) {
+      return;
+    }
+
+    const payload = await requestJson(
+      `/restaurant_owner/inventory?restaurant_id=${restaurantId}`,
+    );
+    setInventoryItems(payload.data.inventory ?? []);
+  }
+
   useEffect(() => {
     storeOwner(owner);
   }, [owner]);
@@ -300,6 +327,9 @@ function OwnerPortalPage() {
     }
 
     refreshRestaurantMenu(owner.restaurant.id).catch((error) =>
+      setPortalStatus(error.message),
+    );
+    refreshInventory(owner.restaurant.id).catch((error) =>
       setPortalStatus(error.message),
     );
     refreshOrders(owner.restaurant.id).catch((error) =>
@@ -433,6 +463,43 @@ function OwnerPortalPage() {
     }
   }
 
+  async function handleAddInventory(event) {
+    event.preventDefault();
+
+    if (!owner?.id) {
+      return;
+    }
+
+    try {
+      const payload = await requestJson("/restaurant_owner/add_inventory", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ownerId: owner.id,
+          name: inventoryForm.name,
+          quantity: Number(inventoryForm.quantity),
+          unit: inventoryForm.unit,
+          price: Number(inventoryForm.price),
+          available: inventoryForm.available,
+        }),
+      });
+
+      setInventoryForm({
+        name: "",
+        quantity: "",
+        unit: "kg",
+        price: "",
+        available: true,
+      });
+      setPortalStatus(payload.message);
+      await refreshInventory(payload.data.restaurantId);
+    } catch (error) {
+      setPortalStatus(error.message);
+    }
+  }
+
   async function handleRefreshOrders() {
     if (!owner?.restaurant?.id) {
       return;
@@ -446,9 +513,160 @@ function OwnerPortalPage() {
     }
   }
 
+  function beginInventoryEdit(item) {
+    setEditingInventoryId(item.id);
+    setInventoryEditForm({
+      name: item.name,
+      quantity: item.quantity.toString(),
+      unit: item.unit || "kg",
+      price: item.price.toString(),
+      available: item.available !== false,
+    });
+  }
+
+  function cancelInventoryEdit() {
+    setEditingInventoryId(null);
+    setInventoryEditForm({
+      name: "",
+      quantity: "",
+      unit: "kg",
+      price: "",
+      available: true,
+    });
+  }
+
+  async function handleSaveInventoryEdit(inventoryId) {
+    if (!owner?.id) {
+      return;
+    }
+
+    try {
+      const payload = await requestJson(
+        `/restaurant_owner/inventory/${inventoryId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ownerId: owner.id,
+            name: inventoryEditForm.name,
+            quantity: Number(inventoryEditForm.quantity),
+            unit: inventoryEditForm.unit,
+            price: Number(inventoryEditForm.price),
+            available: inventoryEditForm.available,
+          }),
+        },
+      );
+
+      await refreshInventory(payload.data.restaurantId);
+      setPortalStatus(payload.message);
+      cancelInventoryEdit();
+    } catch (error) {
+      setPortalStatus(error.message);
+    }
+  }
+
+  async function handleDeleteInventory(inventoryId) {
+    if (!owner?.id) {
+      return;
+    }
+
+    try {
+      const payload = await requestJson(
+        `/restaurant_owner/inventory/${inventoryId}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ownerId: owner.id,
+          }),
+        },
+      );
+
+      await refreshInventory(payload.data.restaurantId);
+      setPortalStatus(payload.message);
+
+      if (editingInventoryId === inventoryId) {
+        cancelInventoryEdit();
+      }
+    } catch (error) {
+      setPortalStatus(error.message);
+    }
+  }
+
+  async function handleToggleInventoryAvailability(item) {
+    if (!owner?.id) {
+      return;
+    }
+
+    try {
+      const payload = await requestJson(
+        `/restaurant_owner/inventory/${item.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ownerId: owner.id,
+            name: item.name,
+            quantity: Number(item.quantity),
+            unit: item.unit || "kg",
+            price: Number(item.price),
+            available: item.available === false,
+          }),
+        },
+      );
+
+      await refreshInventory(payload.data.restaurantId);
+      setPortalStatus(payload.message);
+    } catch (error) {
+      setPortalStatus(error.message);
+    }
+  }
+
+  async function handleMarkOrderPaid(orderId) {
+    if (!owner?.restaurant?.id) {
+      return;
+    }
+
+    try {
+      const payload = await requestJson(
+        `/restaurant_owner/orders/${orderId}/payment`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            restaurantId: owner.restaurant.id,
+            paymentStatus: "paid",
+          }),
+        },
+      );
+
+      setOrdersData((current) => ({
+        ...current,
+        orders: current.orders.map((order) =>
+          order.id === orderId
+            ? { ...order, paymentStatus: "paid" }
+            : order,
+        ),
+      }));
+      setPortalStatus(payload.message);
+    } catch (error) {
+      setPortalStatus(error.message);
+    }
+  }
+
   function handleLogout() {
     setOwner(null);
     setMenuItems([]);
+    setInventoryItems([]);
+    cancelInventoryEdit();
     setOrdersData({ totalOrders: 0, orders: [] });
     setQrData(null);
     setPortalStatus("Logged out");
@@ -520,16 +738,42 @@ function OwnerPortalPage() {
         </section>
       ) : (
         <section className="owner-grid">
+          <section className="owner-metrics">
+            <article className="mini-panel metric-card">
+              <span className="metric-label">Menu items</span>
+              <strong>{menuItems.length}</strong>
+              <p>Active dishes available for ordering.</p>
+            </article>
+            <article className="mini-panel metric-card">
+              <span className="metric-label">Stock lines</span>
+              <strong>{inventoryItems.length}</strong>
+              <p>Tracked inventory entries for the kitchen.</p>
+            </article>
+            <article className="mini-panel metric-card">
+              <span className="metric-label">Orders</span>
+              <strong>{ordersData.totalOrders}</strong>
+              <p>All orders recorded for this restaurant.</p>
+            </article>
+            <article className="mini-panel metric-card">
+              <span className="metric-label">Status</span>
+              <strong>{qrData ? "QR ready" : "Operational"}</strong>
+              <p>{portalStatus}</p>
+            </article>
+          </section>
+
           <section className="panel">
             <div className="panel-heading">
               <div>
                 <p className="section-label">Menu Items</p>
                 <h2>Add a dish</h2>
+                <p className="panel-note">
+                  Build a clean menu with pricing and ingredients.
+                </p>
               </div>
-              <p className="status-text">{menuItems.length} listed</p>
+              <p className="status-text panel-count">{menuItems.length} listed</p>
             </div>
 
-            <form className="stack-form" onSubmit={handleAddItem}>
+            <form className="stack-form compact-form" onSubmit={handleAddItem}>
               <label>
                 <span>Dish title</span>
                 <input
@@ -573,25 +817,27 @@ function OwnerPortalPage() {
                   required
                 />
               </label>
-              <button className="primary-button" type="submit">
-                Add Item
-              </button>
+              <div className="form-actions">
+                <button className="primary-button" type="submit">
+                  Add Item
+                </button>
+              </div>
             </form>
 
-            <div className="owner-list">
+            <div className="owner-list compact-list">
               {menuItems.length === 0 ? (
                 <p className="empty-state">No menu items added yet.</p>
               ) : (
                 menuItems.map((item) => (
-                  <article className="owner-list-item" key={item.id}>
-                    <div>
+                  <article className="owner-list-item compact-card" key={item.id}>
+                    <div className="card-copy">
                       <h3>{item.title}</h3>
-                      <p>
+                      <p className="card-meta">
                         {item.ingredients?.join(" • ") ||
                           "Ingredients will be updated soon"}
                       </p>
                     </div>
-                    <strong>{formatPrice(item.price)}</strong>
+                    <strong className="price-chip">{formatPrice(item.price)}</strong>
                   </article>
                 ))
               )}
@@ -603,10 +849,13 @@ function OwnerPortalPage() {
               <div>
                 <p className="section-label">QR Generator</p>
                 <h2>Create table link</h2>
+                <p className="panel-note">
+                  Generate a table QR and open the guest menu directly.
+                </p>
               </div>
             </div>
 
-            <form className="stack-form" onSubmit={handleGenerateQr}>
+            <form className="stack-form compact-form" onSubmit={handleGenerateQr}>
               <label>
                 <span>Table number</span>
                 <input
@@ -635,22 +884,285 @@ function OwnerPortalPage() {
                   required
                 />
               </label>
-              <button className="primary-button" type="submit">
-                Generate QR
-              </button>
+              <div className="form-actions">
+                <button className="primary-button" type="submit">
+                  Generate QR
+                </button>
+              </div>
             </form>
 
             {qrData ? (
-              <div className="qr-result">
+              <div className="qr-result qr-card">
                 <img
                   src={qrData.qrImageUrl}
                   alt={`QR code for table ${qrData.tableNumber}`}
                 />
-                <a href={qrData.link} target="_blank" rel="noreferrer">
-                  {qrData.link}
-                </a>
+                <div className="qr-copy">
+                  <span className="metric-label">Table {qrData.tableNumber}</span>
+                  <a href={qrData.link} target="_blank" rel="noreferrer">
+                    {qrData.link}
+                  </a>
+                </div>
               </div>
             ) : null}
+          </section>
+
+          <section className="panel">
+            <div className="panel-heading">
+              <div>
+                <p className="section-label">Inventory</p>
+                <h2>Add stock item</h2>
+                <p className="panel-note">
+                  Track ingredients and update quantities as stock changes.
+                </p>
+              </div>
+              <p className="status-text panel-count">
+                {inventoryItems.length} in stock list
+              </p>
+            </div>
+
+            <form className="stack-form compact-form" onSubmit={handleAddInventory}>
+              <label>
+                <span>Stock name</span>
+                <input
+                  value={inventoryForm.name}
+                  onChange={(event) =>
+                    setInventoryForm((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                  placeholder="Tomato"
+                  required
+                />
+              </label>
+              <label>
+                <span>Quantity</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={inventoryForm.quantity}
+                  onChange={(event) =>
+                    setInventoryForm((current) => ({
+                      ...current,
+                      quantity: event.target.value,
+                    }))
+                  }
+                  placeholder="20"
+                  required
+                />
+              </label>
+              <label>
+                <span>Unit</span>
+                <input
+                  value={inventoryForm.unit}
+                  onChange={(event) =>
+                    setInventoryForm((current) => ({
+                      ...current,
+                      unit: event.target.value,
+                    }))
+                  }
+                  placeholder="kg"
+                />
+              </label>
+              <label>
+                <span>Cost price</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={inventoryForm.price}
+                  onChange={(event) =>
+                    setInventoryForm((current) => ({
+                      ...current,
+                      price: event.target.value,
+                    }))
+                  }
+                  placeholder="120"
+                  required
+                />
+              </label>
+              <label className="toggle-row">
+                <span>Availability</span>
+                <button
+                  className={`toggle-button ${
+                    inventoryForm.available ? "toggle-on" : ""
+                  }`}
+                  type="button"
+                  onClick={() =>
+                    setInventoryForm((current) => ({
+                      ...current,
+                      available: !current.available,
+                    }))
+                  }
+                >
+                  <span className="toggle-knob" />
+                  <span>{inventoryForm.available ? "Available" : "Not available"}</span>
+                </button>
+              </label>
+              <div className="form-actions">
+                <button className="primary-button" type="submit">
+                  Add Inventory
+                </button>
+              </div>
+            </form>
+
+            <div className="owner-list compact-list">
+              {inventoryItems.length === 0 ? (
+                <p className="empty-state">No inventory items added yet.</p>
+              ) : (
+                inventoryItems.map((item) => (
+                  <article className="owner-list-item compact-card" key={item.id}>
+                    {editingInventoryId === item.id ? (
+                      <div className="inventory-editor">
+                        <label>
+                          <span>Name</span>
+                          <input
+                            value={inventoryEditForm.name}
+                            onChange={(event) =>
+                              setInventoryEditForm((current) => ({
+                                ...current,
+                                name: event.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <label>
+                          <span>Quantity</span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={inventoryEditForm.quantity}
+                            onChange={(event) =>
+                              setInventoryEditForm((current) => ({
+                                ...current,
+                                quantity: event.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <label>
+                          <span>Unit</span>
+                          <input
+                            value={inventoryEditForm.unit}
+                            onChange={(event) =>
+                              setInventoryEditForm((current) => ({
+                                ...current,
+                                unit: event.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <label>
+                          <span>Cost price</span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={inventoryEditForm.price}
+                            onChange={(event) =>
+                              setInventoryEditForm((current) => ({
+                                ...current,
+                                price: event.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="toggle-row">
+                          <span>Availability</span>
+                          <button
+                            className={`toggle-button ${
+                              inventoryEditForm.available ? "toggle-on" : ""
+                            }`}
+                            type="button"
+                            onClick={() =>
+                              setInventoryEditForm((current) => ({
+                                ...current,
+                                available: !current.available,
+                              }))
+                            }
+                          >
+                            <span className="toggle-knob" />
+                            <span>
+                              {inventoryEditForm.available
+                                ? "Available"
+                                : "Not available"}
+                            </span>
+                          </button>
+                        </label>
+                        <div className="inventory-actions">
+                          <button
+                            className="primary-button"
+                            type="button"
+                            onClick={() => handleSaveInventoryEdit(item.id)}
+                          >
+                            Save
+                          </button>
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            onClick={cancelInventoryEdit}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="card-copy">
+                          <h3>{item.name}</h3>
+                          <p className="card-meta">Current stock available</p>
+                        </div>
+                        <div className="inventory-card-side">
+                          <strong className="stock-chip">
+                            {item.quantity} {item.unit}
+                          </strong>
+                          <strong className="price-chip">
+                            Cost {formatPrice(item.price)}
+                          </strong>
+                          <span
+                            className={`availability-pill ${
+                              item.available !== false
+                                ? "availability-on"
+                                : "availability-off"
+                            }`}
+                          >
+                            {item.available !== false
+                              ? "Available"
+                              : "Not available"}
+                          </span>
+                          <div className="inventory-actions">
+                            <button
+                              className={`secondary-button toggle-inline-button ${
+                                item.available !== false ? "toggle-inline-on" : ""
+                              }`}
+                              type="button"
+                              onClick={() => handleToggleInventoryAvailability(item)}
+                            >
+                              {item.available !== false
+                                ? "Set Not Available"
+                                : "Set Available"}
+                            </button>
+                            <button
+                              className="secondary-button"
+                              type="button"
+                              onClick={() => beginInventoryEdit(item)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="secondary-button danger-button"
+                              type="button"
+                              onClick={() => handleDeleteInventory(item.id)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </article>
+                ))
+              )}
+            </div>
           </section>
 
           <section className="panel owner-orders">
@@ -658,6 +1170,9 @@ function OwnerPortalPage() {
               <div>
                 <p className="section-label">Order Stream</p>
                 <h2>Incoming orders</h2>
+                <p className="panel-note">
+                  Review new orders and mark them paid after collection.
+                </p>
               </div>
               <button
                 className="secondary-button"
@@ -670,30 +1185,36 @@ function OwnerPortalPage() {
 
             <p className="status-text">{ordersData.totalOrders} total orders</p>
 
-            <div className="owner-list">
+            <div className="owner-list compact-list orders-grid">
               {ordersData.orders.length === 0 ? (
                 <p className="empty-state">
                   No orders yet for this restaurant.
                 </p>
               ) : (
                 ordersData.orders.map((order) => (
-                  <article className="order-card" key={order.id}>
+                  <article className="order-card compact-order-card" key={order.id}>
                     <div className="order-card-head">
-                      <div>
+                      <div className="card-copy">
                         <h3>Order {order.id.slice(-6)}</h3>
-                        <p>
+                        <p className="card-meta">
                           {order.tableNumber
                             ? `Table ${order.tableNumber}`
                             : "No table number"}{" "}
                           • {new Date(order.time).toLocaleString("en-IN")}
                         </p>
                       </div>
-                      <span className="badge">{order.paymentStatus}</span>
+                      <span
+                        className={`badge ${
+                          order.paymentStatus === "paid" ? "success-badge" : ""
+                        }`}
+                      >
+                        {order.paymentStatus}
+                      </span>
                     </div>
                     <div className="order-lines">
                       {order.items.map((item) => (
                         <div
-                          className="order-line"
+                          className="order-line compact-order-line"
                           key={`${order.id}-${item.recipeId}`}
                         >
                           <span>
@@ -707,6 +1228,15 @@ function OwnerPortalPage() {
                       <span>Total</span>
                       <strong>{formatPrice(order.totalPrice)}</strong>
                     </div>
+                    {order.paymentStatus !== "paid" ? (
+                      <button
+                        className="primary-button order-action-button"
+                        type="button"
+                        onClick={() => handleMarkOrderPaid(order.id)}
+                      >
+                        Mark as Paid
+                      </button>
+                    ) : null}
                   </article>
                 ))
               )}

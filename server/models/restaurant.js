@@ -14,6 +14,15 @@ const restaurantSchema = new mongoose.Schema({
       price: { type: Number, required: true },
     },
   ],
+  inventory: [
+    {
+      name: { type: String, required: true, trim: true },
+      quantity: { type: Number, required: true, min: 0 },
+      unit: { type: String, trim: true, default: "kg" },
+      price: { type: Number, required: true, min: 0 },
+      available: { type: Boolean, required: true, default: true },
+    },
+  ],
 });
 
 const Restaurant = mongoose.model("Restaurant", restaurantSchema);

@@ -204,4 +204,79 @@ async function getOrdersByRestaurant(request, reply) {
   }
 }
 
-export { createOrder, getOrdersByRestaurant };
+async function updateOrderPaymentStatus(request, reply) {
+  try {
+    const orderId = request.params.orderId?.toString?.().trim();
+    const reqBody = request.body ?? {};
+    const restaurantId = reqBody.restaurantId?.toString?.().trim();
+    const paymentStatus = reqBody.paymentStatus?.toString?.().trim();
+
+    if (!orderId || !restaurantId || !paymentStatus) {
+      return reply.code(400).send({
+        status: "error",
+        message: "orderId, restaurantId and paymentStatus are required",
+      });
+    }
+
+    if (paymentStatus !== "paid") {
+      return reply.code(400).send({
+        status: "error",
+        message: "Only paid status updates are supported",
+      });
+    }
+
+    const order = await Order.findById(orderId);
+
+    if (!order) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Order not found",
+      });
+    }
+
+    if (order.restaurant_id.toString() !== restaurantId) {
+      return reply.code(403).send({
+        status: "error",
+        message: "This order does not belong to the provided restaurant",
+      });
+    }
+
+    if (order.paymentStatus === "paid") {
+      return reply.send({
+        status: "success",
+        message: "Order is already marked as paid",
+        data: {
+          order: {
+            id: order._id,
+            paymentStatus: order.paymentStatus,
+          },
+        },
+      });
+    }
+
+    order.paymentStatus = "paid";
+    await order.save();
+
+    logger.info(`Order marked as paid: ${order._id}`);
+
+    return reply.send({
+      status: "success",
+      message: "Order marked as paid successfully",
+      data: {
+        order: {
+          id: order._id,
+          paymentStatus: order.paymentStatus,
+        },
+      },
+    });
+  } catch (error) {
+    logger.error(`Unable to update order payment status: ${error.message}`);
+
+    return reply.code(500).send({
+      status: "error",
+      message: "Unable to update order payment status",
+    });
+  }
+}
+
+export { createOrder, getOrdersByRestaurant, updateOrderPaymentStatus };

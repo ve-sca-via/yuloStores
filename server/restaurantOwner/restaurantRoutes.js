@@ -3,14 +3,25 @@ import {
   restaurentOwnerLogin,
   restaurentOwnerSignup,
 } from "./controllers/auths.js";
-import { addItems, registerRestaurants } from "./controllers/addItems.js";
+import {
+  addInventory,
+  addItems,
+  deleteInventoryItem,
+  getInventory,
+  registerRestaurants,
+  updateInventoryItem,
+} from "./controllers/addItems.js";
 import { generateQr } from "./controllers/qrGeneration.js";
 import {
   getRestaurantMenu,
   serveClientApp,
   serveClientAsset,
 } from "./controllers/menu.js";
-import { createOrder, getOrdersByRestaurant } from "./controllers/orders.js";
+import {
+  createOrder,
+  getOrdersByRestaurant,
+  updateOrderPaymentStatus,
+} from "./controllers/orders.js";
 
 const restaurantOwnerRoutes = (app) => {
   app.get("/health", serverHealth);
@@ -21,10 +32,15 @@ const restaurantOwnerRoutes = (app) => {
   app.get("/api/orders", getOrdersByRestaurant);
   app.get("/restaurant_owner/orders", getOrdersByRestaurant);
   app.post("/api/orders", createOrder);
+  app.patch("/restaurant_owner/orders/:orderId/payment", updateOrderPaymentStatus);
   app.post("/restaurant_owner/signup", restaurentOwnerSignup);
   app.post("/restaurant_owner/login", restaurentOwnerLogin);
   app.post("/restaurant_owner/register_restaurant", registerRestaurants);
   app.post("/restaurant_owner/add_item", addItems);
+  app.post("/restaurant_owner/add_inventory", addInventory);
+  app.get("/restaurant_owner/inventory", getInventory);
+  app.patch("/restaurant_owner/inventory/:inventoryId", updateInventoryItem);
+  app.delete("/restaurant_owner/inventory/:inventoryId", deleteInventoryItem);
   app.post("/restaurant_owner/generate_qr", generateQr);
 };
 
