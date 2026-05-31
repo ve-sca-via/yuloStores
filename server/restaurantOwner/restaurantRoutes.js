@@ -7,10 +7,12 @@ import {
   updateRestaurantOwnerProfile,
 } from "./controllers/auths.js";
 import {
+  addStaffMember,
   addExpense,
   addInventory,
   addInventoryMovement,
   addItems,
+  deleteStaffMember,
   deleteExpense,
   deleteMenuItem,
   deleteInventoryItem,
@@ -28,6 +30,10 @@ import {
   serveClientApp,
   serveClientAsset,
 } from "./controllers/menu.js";
+import {
+  addEmployeeMember,
+  loginEmployeeMember,
+} from "./controllers/members.js";
 import {
   createOrder,
   generateOrderBill,
@@ -53,6 +59,10 @@ const restaurantOwnerRoutes = (app) => {
   app.patch("/restaurant_owner/profile/:ownerId", updateRestaurantOwnerProfile);
   app.post("/restaurant_owner/register_restaurant", registerRestaurants);
   app.patch("/restaurant_owner/restaurant", updateRestaurant);
+  app.post("/restaurant_owner/employees", addEmployeeMember);
+  app.post("/restaurant_owner/employees/login", loginEmployeeMember);
+  app.post("/restaurant_owner/members", addStaffMember);
+  app.delete("/restaurant_owner/members/:memberId", deleteStaffMember);
   app.post("/restaurant_owner/add_item", addItems);
   app.patch("/restaurant_owner/menu/:itemId", updateMenuItem);
   app.delete("/restaurant_owner/menu/:itemId", deleteMenuItem);

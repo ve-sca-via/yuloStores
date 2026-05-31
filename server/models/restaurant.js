@@ -1,5 +1,22 @@
 import mongoose from "mongoose";
 
+const staffMemberSchema = new mongoose.Schema(
+  {
+    role: {
+      type: String,
+      required: true,
+      enum: ["chef", "waiter"],
+    },
+    name: { type: String, trim: true, default: "" },
+    email: { type: String, trim: true, lowercase: true, default: "" },
+    employeeId: { type: String, trim: true, lowercase: true, default: "" },
+    password: { type: String, default: "" },
+  },
+  {
+    timestamps: true,
+  },
+);
+
 const restaurantSchema = new mongoose.Schema({
   name: { type: String, required: true },
   owner: {
@@ -49,6 +66,13 @@ const restaurantSchema = new mongoose.Schema({
       createdAt: { type: Date, default: Date.now, required: true },
     },
   ],
+  validTables: [
+    {
+      type: String,
+      trim: true,
+    },
+  ],
+  staffMembers: [staffMemberSchema],
 });
 
 const Restaurant = mongoose.model("Restaurant", restaurantSchema);

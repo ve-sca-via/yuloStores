@@ -2,6 +2,7 @@ import "dotenv/config";
 import fastify from "fastify";
 import chefRoutes from "./chefPortal/chefRoutes.js";
 import restaurantOwnerRoutes from "./restaurantOwner/restaurantRoutes.js";
+import waiterRoutes from "./waiterPortal/waiterRoutes.js";
 import logger from "./utils/logger.js";
 import { mongoConnect } from "./config/mongoConnector.js";
 
@@ -16,6 +17,7 @@ app.get("/", async () => {
 
 app.register(restaurantOwnerRoutes);
 app.register(chefRoutes);
+app.register(waiterRoutes);
 
 const start = async () => {
   try {

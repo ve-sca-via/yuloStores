@@ -5,6 +5,28 @@ import {
   saveLoggedInOwnerId,
 } from "../../utils/restaurantOwnerSession.js";
 
+function serializeRestaurant(restaurant) {
+  if (!restaurant) {
+    return restaurant;
+  }
+
+  return {
+    id: restaurant._id,
+    name: restaurant.name,
+    owner: restaurant.owner,
+    recipies: restaurant.recipies ?? [],
+    staffMembers: (restaurant.staffMembers ?? []).map((member) => ({
+      id: member._id,
+      role: member.role,
+      name: member.name,
+      email: member.email,
+      employeeId: member.employeeId,
+      createdAt: member.createdAt,
+      updatedAt: member.updatedAt,
+    })),
+  };
+}
+
 async function restaurentOwnerSignup(request, reply) {
   try {
     const reqBody = request.body ?? {};
@@ -50,7 +72,7 @@ async function restaurentOwnerSignup(request, reply) {
           id: owner._id,
           name: owner.name,
           email: owner.email,
-          restaurant: owner.restaurant,
+          restaurant: serializeRestaurant(owner.restaurant),
         },
       },
     });
@@ -104,7 +126,7 @@ async function restaurentOwnerLogin(request, reply) {
           id: owner._id,
           name: owner.name,
           email: owner.email,
-          restaurant: owner.restaurant,
+          restaurant: serializeRestaurant(owner.restaurant),
         },
         session: {
           ownerId: owner._id,
@@ -149,7 +171,7 @@ async function getRestaurantOwnerProfile(request, reply) {
           id: owner._id,
           name: owner.name,
           email: owner.email,
-          restaurant: owner.restaurant,
+          restaurant: serializeRestaurant(owner.restaurant),
         },
       },
     });
@@ -218,7 +240,7 @@ async function updateRestaurantOwnerProfile(request, reply) {
           id: owner._id,
           name: owner.name,
           email: owner.email,
-          restaurant: owner.restaurant,
+          restaurant: serializeRestaurant(owner.restaurant),
         },
       },
     });

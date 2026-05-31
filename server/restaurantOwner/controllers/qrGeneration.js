@@ -70,6 +70,15 @@ async function generateQr(request, reply) {
       });
     }
 
+    const registeredTables = Array.isArray(restaurant.validTables)
+      ? restaurant.validTables
+      : [];
+
+    if (!registeredTables.includes(tableNumber)) {
+      restaurant.validTables = [...registeredTables, tableNumber];
+      await restaurant.save();
+    }
+
     const menuUrl = new URL("/menu", getBaseUrl(request, reqBody.baseUrl));
     menuUrl.searchParams.set("restaurantId", restaurant._id.toString());
     menuUrl.searchParams.set("tableNumber", tableNumber);

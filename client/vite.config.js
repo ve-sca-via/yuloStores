@@ -8,6 +8,7 @@ export default defineConfig({
     proxy: {
       "/api": "http://localhost:3000",
       "/chef": "http://localhost:3000",
+      "/waiter": "http://localhost:3000",
       "/restaurant_owner": "http://localhost:3000",
       "/health": "http://localhost:3000",
     },

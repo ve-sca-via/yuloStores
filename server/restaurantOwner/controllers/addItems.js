@@ -22,6 +22,28 @@ async function getOwnerAndRestaurant(ownerId) {
   };
 }
 
+function serializeStaffMember(member) {
+  return {
+    id: member._id,
+    role: member.role,
+    name: member.name,
+    email: member.email,
+    employeeId: member.employeeId,
+    createdAt: member.createdAt,
+    updatedAt: member.updatedAt,
+  };
+}
+
+function serializeRestaurant(restaurant) {
+  return {
+    id: restaurant._id,
+    name: restaurant.name,
+    owner: restaurant.owner,
+    recipies: restaurant.recipies,
+    staffMembers: (restaurant.staffMembers ?? []).map(serializeStaffMember),
+  };
+}
+
 async function registerRestaurants(request, reply) {
   try {
     const reqBody = request.body ?? {};
@@ -81,12 +103,7 @@ async function registerRestaurants(request, reply) {
       status: "success",
       message: "Restaurant registered successfully",
       data: {
-        restaurant: {
-          id: restaurant._id,
-          name: restaurant.name,
-          owner: restaurant.owner,
-          recipies: restaurant.recipies,
-        },
+        restaurant: serializeRestaurant(restaurant),
       },
     });
   } catch (error) {
@@ -261,11 +278,7 @@ async function updateRestaurant(request, reply) {
       status: "success",
       message: "Restaurant updated successfully",
       data: {
-        restaurant: {
-          id: restaurant._id,
-          name: restaurant.name,
-          owner: restaurant.owner,
-        },
+        restaurant: serializeRestaurant(restaurant),
       },
     });
   } catch (error) {
@@ -274,6 +287,139 @@ async function updateRestaurant(request, reply) {
     return reply.code(500).send({
       status: "error",
       message: "Unable to update restaurant",
+    });
+  }
+}
+
+async function addStaffMember(request, reply) {
+  try {
+    const ownerId =
+      request.body?.ownerId?.trim?.() ??
+      request.body?.ownerId ??
+      (await getLoggedInOwnerId());
+    const role = request.body?.role?.toString?.().trim();
+    const name = request.body?.name?.trim?.();
+    const email = request.body?.email?.trim?.().toLowerCase();
+    const allowedRoles = ["chef", "waiter"];
+
+    if (!ownerId || !allowedRoles.includes(role) || !name || !email) {
+      return reply.code(400).send({
+        status: "error",
+        message: "ownerId, role, name and email are required",
+      });
+    }
+
+    const { owner, restaurant } = await getOwnerAndRestaurant(ownerId);
+
+    if (!owner) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant owner not found",
+      });
+    }
+
+    if (!restaurant) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant not registered for this owner",
+      });
+    }
+
+    const emailExists = (restaurant.staffMembers ?? []).some(
+      (member) => member.email === email,
+    );
+
+    if (emailExists) {
+      return reply.code(409).send({
+        status: "error",
+        message: "A staff member already exists with this email",
+      });
+    }
+
+    restaurant.staffMembers.push({
+      role,
+      name,
+      email,
+    });
+    await restaurant.save();
+
+    const createdMember =
+      restaurant.staffMembers[restaurant.staffMembers.length - 1];
+
+    return reply.code(201).send({
+      status: "success",
+      message: `${role} member added successfully`,
+      data: {
+        member: serializeStaffMember(createdMember),
+        restaurant: serializeRestaurant(restaurant),
+      },
+    });
+  } catch (error) {
+    logger.error(`Error from addStaffMember: ${error.message}`);
+
+    return reply.code(500).send({
+      status: "error",
+      message: "Unable to add staff member",
+    });
+  }
+}
+
+async function deleteStaffMember(request, reply) {
+  try {
+    const memberId = request.params.memberId?.toString?.().trim();
+    const ownerId =
+      request.body?.ownerId?.trim?.() ??
+      request.body?.ownerId ??
+      (await getLoggedInOwnerId());
+
+    if (!ownerId || !memberId) {
+      return reply.code(400).send({
+        status: "error",
+        message: "ownerId and memberId are required",
+      });
+    }
+
+    const { owner, restaurant } = await getOwnerAndRestaurant(ownerId);
+
+    if (!owner) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant owner not found",
+      });
+    }
+
+    if (!restaurant) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant not registered for this owner",
+      });
+    }
+
+    const member = restaurant.staffMembers.id(memberId);
+
+    if (!member) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Staff member not found",
+      });
+    }
+
+    member.deleteOne();
+    await restaurant.save();
+
+    return reply.send({
+      status: "success",
+      message: "Staff member removed successfully",
+      data: {
+        restaurant: serializeRestaurant(restaurant),
+      },
+    });
+  } catch (error) {
+    logger.error(`Error from deleteStaffMember: ${error.message}`);
+
+    return reply.code(500).send({
+      status: "error",
+      message: "Unable to remove staff member",
     });
   }
 }
@@ -1241,10 +1387,12 @@ async function getRestaurantAnalytics(request, reply) {
 }
 
 export {
+  addStaffMember,
   addExpense,
   addInventory,
   addInventoryMovement,
   addItems,
+  deleteStaffMember,
   deleteExpense,
   deleteMenuItem,
   deleteInventoryItem,

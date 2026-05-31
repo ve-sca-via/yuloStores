@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 const OWNER_STORAGE_KEY = "yulo_owner_session";
+const EMPLOYEE_STORAGE_KEY = "yulo_employee_session";
 
 function readStoredOwner() {
   try {
@@ -20,6 +21,25 @@ function storeOwner(owner) {
   }
 
   window.localStorage.setItem(OWNER_STORAGE_KEY, JSON.stringify(owner));
+}
+
+function readStoredEmployee() {
+  try {
+    const rawValue = window.localStorage.getItem(EMPLOYEE_STORAGE_KEY);
+
+    return rawValue ? JSON.parse(rawValue) : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function storeEmployee(employee) {
+  if (!employee) {
+    window.localStorage.removeItem(EMPLOYEE_STORAGE_KEY);
+    return;
+  }
+
+  window.localStorage.setItem(EMPLOYEE_STORAGE_KEY, JSON.stringify(employee));
 }
 
 async function requestJson(url, options = {}) {
@@ -46,6 +66,7 @@ function normalizeOwner(owner) {
           name: owner.restaurant.name,
           owner: owner.restaurant.owner,
           recipies: owner.restaurant.recipies ?? [],
+          staffMembers: owner.restaurant.staffMembers ?? [],
         }
     : null;
 
@@ -55,6 +76,37 @@ function normalizeOwner(owner) {
     email: owner.email,
     restaurant,
   };
+}
+
+function normalizeEmployeeSession(data) {
+  if (!data?.member || !data?.restaurant) {
+    return null;
+  }
+
+  return {
+    member: {
+      id: data.member._id ?? data.member.id,
+      role: data.member.role,
+      name: data.member.name,
+      email: data.member.email,
+      employeeId: data.member.employeeId,
+    },
+    restaurant: {
+      id: data.restaurant._id ?? data.restaurant.id,
+      name: data.restaurant.name,
+    },
+    portal: data.portal,
+  };
+}
+
+function normalizeRecipeId(recipeId) {
+  if (!recipeId) {
+    return "";
+  }
+
+  return typeof recipeId === "string"
+    ? recipeId
+    : recipeId.$oid ?? recipeId.toString?.() ?? String(recipeId);
 }
 
 function formatPrice(price) {
@@ -139,19 +191,25 @@ function AppShell({ children }) {
   const location = useLocation();
   const isOwnerPortal = location.pathname.startsWith("/owner");
   const isChefPortal = location.pathname.startsWith("/chef");
+  const isWaiterPortal = location.pathname.startsWith("/waiter");
+  const homeTarget = isOwnerPortal
+    ? "/owner"
+    : isChefPortal
+      ? "/chef"
+      : isWaiterPortal
+        ? "/waiter"
+        : "/menu";
 
   return (
     <div className="app-shell">
       <header className="topbar">
-        <Link
-          className="brand"
-          to={isOwnerPortal ? "/owner" : isChefPortal ? "/chef" : "/menu"}
-        >
+        <Link className="brand" to={homeTarget}>
           Yulo Stores
         </Link>
         <nav className="topnav">
           <Link to="/owner">Owner Portal</Link>
           <Link to="/chef">Chef Portal</Link>
+          <Link to="/waiter">Waiter Portal</Link>
           <Link to="/menu">QR Menu</Link>
         </nav>
       </header>
@@ -247,6 +305,58 @@ function AuthCard({
   );
 }
 
+function EmployeePortalLoginCard({
+  role,
+  form,
+  onChange,
+  onSubmit,
+  loading,
+  status,
+}) {
+  const title = role === "chef" ? "Chef Portal" : "Waiter Portal";
+
+  return (
+    <main className="page-shell owner-shell">
+      <section className="panel auth-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="section-label">{title}</p>
+            <h1>Employee login</h1>
+          </div>
+          <p className="status-text">{status}</p>
+        </div>
+
+        <form className="stack-form" onSubmit={onSubmit}>
+          <label>
+            <span>Employee ID</span>
+            <input
+              name="employeeId"
+              value={form.employeeId}
+              onChange={onChange}
+              placeholder={`${role}01`}
+              required
+            />
+          </label>
+          <label>
+            <span>Password</span>
+            <input
+              name="password"
+              type="password"
+              value={form.password}
+              onChange={onChange}
+              placeholder="Enter password"
+              required
+            />
+          </label>
+          <button className="primary-button" type="submit" disabled={loading}>
+            {loading ? "Logging in..." : "Login"}
+          </button>
+        </form>
+      </section>
+    </main>
+  );
+}
+
 function OwnerPortalPage() {
   const [owner, setOwner] = useState(() => readStoredOwner());
   const [authMode, setAuthMode] = useState("login");
@@ -265,6 +375,18 @@ function OwnerPortalPage() {
   });
   const [restaurantForm, setRestaurantForm] = useState({
     name: "",
+  });
+  const [chefMemberForm, setChefMemberForm] = useState({
+    name: "",
+    email: "",
+    employeeId: "",
+    password: "",
+  });
+  const [waiterMemberForm, setWaiterMemberForm] = useState({
+    name: "",
+    email: "",
+    employeeId: "",
+    password: "",
   });
   const [itemForm, setItemForm] = useState({
     title: "",
@@ -326,7 +448,7 @@ function OwnerPortalPage() {
     }
 
     const payload = await requestJson(
-      `/chef/orders?restaurant_id=${restaurantId}`,
+      `/restaurant_owner/orders?restaurant_id=${restaurantId}`,
     );
     setOrdersData({
       totalOrders: payload.data.totalOrders,
@@ -400,6 +522,18 @@ function OwnerPortalPage() {
     refreshOrders(owner.restaurant.id).catch((error) =>
       setPortalStatus(error.message),
     );
+  }, [owner?.restaurant?.id]);
+
+  useEffect(() => {
+    if (!owner?.restaurant?.id) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      refreshOrders(owner.restaurant.id).catch(() => {});
+    }, 5000);
+
+    return () => window.clearInterval(intervalId);
   }, [owner?.restaurant?.id]);
 
   function handleAuthInputChange(event) {
@@ -511,6 +645,91 @@ function OwnerPortalPage() {
           name: restaurantForm.name,
         }),
       });
+
+      setOwner((current) => ({
+        ...current,
+        restaurant: {
+          ...current.restaurant,
+          ...payload.data.restaurant,
+        },
+      }));
+      setPortalStatus(payload.message);
+    } catch (error) {
+      setPortalStatus(error.message);
+    }
+  }
+
+  async function handleAddStaffMember(role) {
+    if (!owner?.id) {
+      return;
+    }
+
+    const form = role === "chef" ? chefMemberForm : waiterMemberForm;
+
+    try {
+      const payload = await requestJson("/restaurant_owner/employees", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ownerId: owner.id,
+          role,
+          name: form.name,
+          email: form.email,
+          employeeId: form.employeeId,
+          password: form.password,
+        }),
+      });
+
+      setOwner((current) => ({
+        ...current,
+        restaurant: {
+          ...current.restaurant,
+          ...payload.data.restaurant,
+        },
+      }));
+
+      if (role === "chef") {
+        setChefMemberForm({
+          name: "",
+          email: "",
+          employeeId: "",
+          password: "",
+        });
+      } else {
+        setWaiterMemberForm({
+          name: "",
+          email: "",
+          employeeId: "",
+          password: "",
+        });
+      }
+
+      setPortalStatus(payload.message);
+    } catch (error) {
+      setPortalStatus(error.message);
+    }
+  }
+
+  async function handleDeleteStaffMember(memberId) {
+    if (!owner?.id) {
+      return;
+    }
+
+    try {
+      const payload = await requestJson(
+        `/restaurant_owner/members/${memberId}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ownerId: owner.id,
+          }),
+        },
+      );
 
       setOwner((current) => ({
         ...current,
@@ -1064,6 +1283,10 @@ function OwnerPortalPage() {
     );
   }
 
+  const staffMembers = owner.restaurant?.staffMembers ?? [];
+  const chefMembers = staffMembers.filter((member) => member.role === "chef");
+  const waiterMembers = staffMembers.filter((member) => member.role === "waiter");
+
   return (
     <main className="page-shell owner-shell">
       <section className="hero-card owner-hero">
@@ -1217,6 +1440,206 @@ function OwnerPortalPage() {
                   </button>
                 </div>
               </form>
+
+              <div className="stack-form compact-form">
+                <div>
+                  <p className="section-label">Chef Members</p>
+                  <h3>Add chef</h3>
+                  <p className="panel-note">
+                    Add kitchen staff members for this restaurant.
+                  </p>
+                </div>
+                <label>
+                  <span>Chef name</span>
+                  <input
+                    value={chefMemberForm.name}
+                    onChange={(event) =>
+                      setChefMemberForm((current) => ({
+                        ...current,
+                        name: event.target.value,
+                      }))
+                    }
+                    placeholder="Enter chef name"
+                  />
+                </label>
+                <label>
+                  <span>Chef email</span>
+                  <input
+                    type="email"
+                    value={chefMemberForm.email}
+                    onChange={(event) =>
+                      setChefMemberForm((current) => ({
+                        ...current,
+                        email: event.target.value,
+                      }))
+                    }
+                    placeholder="chef@restaurant.com"
+                  />
+                </label>
+                <label>
+                  <span>Chef employee ID</span>
+                  <input
+                    value={chefMemberForm.employeeId}
+                    onChange={(event) =>
+                      setChefMemberForm((current) => ({
+                        ...current,
+                        employeeId: event.target.value,
+                      }))
+                    }
+                    placeholder="chef01"
+                    required
+                  />
+                </label>
+                <label>
+                  <span>Chef password</span>
+                  <input
+                    type="password"
+                    value={chefMemberForm.password}
+                    onChange={(event) =>
+                      setChefMemberForm((current) => ({
+                        ...current,
+                        password: event.target.value,
+                      }))
+                    }
+                    placeholder="Set login password"
+                    required
+                  />
+                </label>
+                <div className="form-actions">
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={() => handleAddStaffMember("chef")}
+                    disabled={
+                      !chefMemberForm.employeeId || !chefMemberForm.password
+                    }
+                  >
+                    Add Chef
+                  </button>
+                </div>
+                <div className="owner-list compact-list">
+                  {chefMembers.length === 0 ? (
+                    <p className="empty-state">No chefs added yet.</p>
+                  ) : (
+                    chefMembers.map((member) => (
+                      <article className="owner-list-item" key={member.id}>
+                        <div>
+                          <h3>{member.name}</h3>
+                          <p>{member.email}</p>
+                          <p>ID: {member.employeeId || "Not set"}</p>
+                        </div>
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => handleDeleteStaffMember(member.id)}
+                        >
+                          Remove
+                        </button>
+                      </article>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="stack-form compact-form">
+                <div>
+                  <p className="section-label">Waiter Members</p>
+                  <h3>Add waiter</h3>
+                  <p className="panel-note">
+                    Add service staff members for table ordering.
+                  </p>
+                </div>
+                <label>
+                  <span>Waiter name</span>
+                  <input
+                    value={waiterMemberForm.name}
+                    onChange={(event) =>
+                      setWaiterMemberForm((current) => ({
+                        ...current,
+                        name: event.target.value,
+                      }))
+                    }
+                    placeholder="Enter waiter name"
+                  />
+                </label>
+                <label>
+                  <span>Waiter email</span>
+                  <input
+                    type="email"
+                    value={waiterMemberForm.email}
+                    onChange={(event) =>
+                      setWaiterMemberForm((current) => ({
+                        ...current,
+                        email: event.target.value,
+                      }))
+                    }
+                    placeholder="waiter@restaurant.com"
+                  />
+                </label>
+                <label>
+                  <span>Waiter employee ID</span>
+                  <input
+                    value={waiterMemberForm.employeeId}
+                    onChange={(event) =>
+                      setWaiterMemberForm((current) => ({
+                        ...current,
+                        employeeId: event.target.value,
+                      }))
+                    }
+                    placeholder="waiter01"
+                    required
+                  />
+                </label>
+                <label>
+                  <span>Waiter password</span>
+                  <input
+                    type="password"
+                    value={waiterMemberForm.password}
+                    onChange={(event) =>
+                      setWaiterMemberForm((current) => ({
+                        ...current,
+                        password: event.target.value,
+                      }))
+                    }
+                    placeholder="Set login password"
+                    required
+                  />
+                </label>
+                <div className="form-actions">
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={() => handleAddStaffMember("waiter")}
+                    disabled={
+                      !waiterMemberForm.employeeId || !waiterMemberForm.password
+                    }
+                  >
+                    Add Waiter
+                  </button>
+                </div>
+                <div className="owner-list compact-list">
+                  {waiterMembers.length === 0 ? (
+                    <p className="empty-state">No waiters added yet.</p>
+                  ) : (
+                    waiterMembers.map((member) => (
+                      <article className="owner-list-item" key={member.id}>
+                        <div>
+                          <h3>{member.name}</h3>
+                          <p>{member.email}</p>
+                          <p>ID: {member.employeeId || "Not set"}</p>
+                        </div>
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => handleDeleteStaffMember(member.id)}
+                        >
+                          Remove
+                        </button>
+                      </article>
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
           </section>
 
@@ -2046,9 +2469,18 @@ function OwnerPortalPage() {
 }
 
 function ChefPortalPage() {
-  const [owner] = useState(() => readStoredOwner());
+  const [employee, setEmployee] = useState(() => readStoredEmployee());
   const [ordersData, setOrdersData] = useState({ totalOrders: 0, orders: [] });
   const [portalStatus, setPortalStatus] = useState("Chef portal ready");
+  const [loginForm, setLoginForm] = useState({ employeeId: "", password: "" });
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginStatus, setLoginStatus] = useState(
+    "Login with your employee credentials",
+  );
+
+  useEffect(() => {
+    storeEmployee(employee);
+  }, [employee]);
 
   async function refreshOrders(restaurantId) {
     if (!restaurantId) {
@@ -2065,22 +2497,51 @@ function ChefPortalPage() {
   }
 
   useEffect(() => {
-    if (!owner?.restaurant?.id) {
+    if (!employee?.restaurant?.id || employee?.member?.role !== "chef") {
       return;
     }
 
-    refreshOrders(owner.restaurant.id).catch((error) =>
+    refreshOrders(employee.restaurant.id).catch((error) =>
       setPortalStatus(error.message),
     );
-  }, [owner?.restaurant?.id]);
+  }, [employee?.member?.role, employee?.restaurant?.id]);
+
+  async function handleEmployeeLogin(event) {
+    event.preventDefault();
+    setLoginLoading(true);
+
+    try {
+      const payload = await requestJson("/restaurant_owner/employees/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(loginForm),
+      });
+      const nextEmployee = normalizeEmployeeSession(payload.data);
+
+      if (nextEmployee?.member?.role !== "chef") {
+        throw new Error("These credentials do not belong to a chef account");
+      }
+
+      setEmployee(nextEmployee);
+      setLoginStatus(payload.message);
+      setPortalStatus("Chef authenticated successfully");
+      setLoginForm({ employeeId: "", password: "" });
+    } catch (error) {
+      setLoginStatus(error.message);
+    } finally {
+      setLoginLoading(false);
+    }
+  }
 
   async function handleRefreshOrders() {
-    if (!owner?.restaurant?.id) {
+    if (!employee?.restaurant?.id) {
       return;
     }
 
     try {
-      await refreshOrders(owner.restaurant.id);
+      await refreshOrders(employee.restaurant.id);
       setPortalStatus("Orders refreshed");
     } catch (error) {
       setPortalStatus(error.message);
@@ -2088,7 +2549,7 @@ function ChefPortalPage() {
   }
 
   async function handleUpdateOrderStatus(orderId, orderStatus) {
-    if (!owner?.restaurant?.id) {
+    if (!employee?.restaurant?.id) {
       return;
     }
 
@@ -2101,7 +2562,7 @@ function ChefPortalPage() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            restaurantId: owner.restaurant.id,
+            restaurantId: employee.restaurant.id,
             orderStatus,
           }),
         },
@@ -2119,22 +2580,21 @@ function ChefPortalPage() {
     }
   }
 
-  if (!owner?.restaurant?.id) {
+  if (!employee?.restaurant?.id || employee?.member?.role !== "chef") {
     return (
-      <main className="page-shell owner-shell">
-        <section className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="section-label">Chef Portal</p>
-              <h1>Login required</h1>
-            </div>
-          </div>
-          <p className="hero-text">
-            Sign in from the owner portal and register a restaurant before using
-            the chef order board.
-          </p>
-        </section>
-      </main>
+      <EmployeePortalLoginCard
+        role="chef"
+        form={loginForm}
+        onChange={(event) =>
+          setLoginForm((current) => ({
+            ...current,
+            [event.target.name]: event.target.value,
+          }))
+        }
+        onSubmit={handleEmployeeLogin}
+        loading={loginLoading}
+        status={loginStatus}
+      />
     );
   }
 
@@ -2143,19 +2603,32 @@ function ChefPortalPage() {
       <section className="hero-card owner-hero">
         <div>
           <p className="section-label">Chef Portal</p>
-          <h1>{owner.restaurant.name}</h1>
+          <h1>{employee.restaurant.name}</h1>
           <p className="hero-text">
             Kitchen order board for preparing, completing, or cancelling dishes.
           </p>
         </div>
         <div className="hero-actions">
           <span className="badge ghost">{portalStatus}</span>
+          <span className="badge">
+            {employee.member.name || employee.member.employeeId}
+          </span>
           <button
             className="secondary-button"
             type="button"
             onClick={handleRefreshOrders}
           >
             Refresh Orders
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => {
+              setEmployee(null);
+              setPortalStatus("Chef logged out");
+            }}
+          >
+            Logout
           </button>
         </div>
       </section>
@@ -2231,6 +2704,452 @@ function ChefPortalPage() {
   );
 }
 
+function WaiterPortalPage() {
+  const [employee, setEmployee] = useState(() => readStoredEmployee());
+  const [restaurant, setRestaurant] = useState(employee?.restaurant ?? null);
+  const [menuStatus, setMenuStatus] = useState("Loading waiter menu...");
+  const [tableNumber, setTableNumber] = useState("");
+  const [lookupStatus, setLookupStatus] = useState(
+    "Enter a table number to load the active order",
+  );
+  const [orderStatus, setOrderStatus] = useState("Select dishes to create an order");
+  const [currentOrder, setCurrentOrder] = useState(null);
+  const [selectedQuantities, setSelectedQuantities] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  const [markingPaid, setMarkingPaid] = useState(false);
+  const [loginForm, setLoginForm] = useState({ employeeId: "", password: "" });
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginStatus, setLoginStatus] = useState(
+    "Login with your employee credentials",
+  );
+
+  useEffect(() => {
+    storeEmployee(employee);
+  }, [employee]);
+
+  useEffect(() => {
+    if (!employee?.restaurant?.id || employee?.member?.role !== "waiter") {
+      return;
+    }
+
+    requestJson(`/waiter/restaurants/${employee.restaurant.id}/menu`)
+      .then((payload) => {
+        setRestaurant(payload.data.restaurant);
+        applyRestaurantTheme(payload.data.restaurant);
+        setMenuStatus("Menu ready for waiter ordering");
+      })
+      .catch((error) => setMenuStatus(error.message));
+  }, [employee?.member?.role, employee?.restaurant?.id]);
+
+  const recipes = restaurant?.recipies ?? [];
+  const selectedItems = recipes
+    .map((item) => ({
+      ...item,
+      quantity: selectedQuantities[normalizeRecipeId(item.id)] ?? 0,
+    }))
+    .filter((item) => item.quantity > 0);
+  const selectedTotal = selectedItems.reduce(
+    (total, item) => total + item.price * item.quantity,
+    0,
+  );
+  const hasPendingOrder = currentOrder?.paymentStatus === "pending";
+  const canSubmitToTable =
+    Boolean(tableNumber.trim()) && selectedItems.length > 0;
+
+  function updateQuantity(recipeId, nextQuantity) {
+    const normalizedRecipeId = normalizeRecipeId(recipeId);
+
+    setSelectedQuantities((current) => {
+      const nextState = { ...current };
+
+      if (nextQuantity <= 0) {
+        delete nextState[normalizedRecipeId];
+      } else {
+        nextState[normalizedRecipeId] = nextQuantity;
+      }
+
+      return nextState;
+    });
+  }
+
+  async function handleEmployeeLogin(event) {
+    event.preventDefault();
+    setLoginLoading(true);
+
+    try {
+      const payload = await requestJson("/restaurant_owner/employees/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(loginForm),
+      });
+      const nextEmployee = normalizeEmployeeSession(payload.data);
+
+      if (nextEmployee?.member?.role !== "waiter") {
+        throw new Error("These credentials do not belong to a waiter account");
+      }
+
+      setEmployee(nextEmployee);
+      setRestaurant(nextEmployee.restaurant);
+      setLoginStatus(payload.message);
+      setMenuStatus("Menu ready for waiter ordering");
+      setLoginForm({ employeeId: "", password: "" });
+    } catch (error) {
+      setLoginStatus(error.message);
+    } finally {
+      setLoginLoading(false);
+    }
+  }
+
+  async function loadPendingOrder(nextTableNumber = tableNumber) {
+    const normalizedTableNumber = nextTableNumber.trim();
+
+    if (!employee?.restaurant?.id || !normalizedTableNumber) {
+      setCurrentOrder(null);
+      setLookupStatus("Enter a table number to load the active order");
+      return;
+    }
+
+    try {
+      const payload = await requestJson(
+        `/waiter/orders/pending?restaurant_id=${employee.restaurant.id}&tableNumber=${encodeURIComponent(normalizedTableNumber)}`,
+      );
+      const order = payload.data.order;
+
+      setCurrentOrder(order);
+      setLookupStatus(
+        order
+          ? `Loaded pending order ${order.id.slice(-6)} for table ${normalizedTableNumber}`
+          : `No pending order for table ${normalizedTableNumber}. A new one will be created when you add items.`,
+      );
+    } catch (error) {
+      setCurrentOrder(null);
+      setLookupStatus(error.message);
+    }
+  }
+
+  async function handleTableLookup(event) {
+    event.preventDefault();
+    await loadPendingOrder();
+  }
+
+  async function handleSubmitOrder() {
+    if (
+      !employee?.restaurant?.id ||
+      !canSubmitToTable
+    ) {
+      return;
+    }
+
+    setSubmitting(true);
+    setOrderStatus("Saving order...");
+
+    try {
+      const payload = await requestJson("/waiter/orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          restaurantId: employee.restaurant.id,
+          tableNumber: tableNumber.trim(),
+          items: selectedItems.map((item) => ({
+            recipeId: normalizeRecipeId(item.id),
+            quantity: item.quantity,
+          })),
+        }),
+      });
+
+      setCurrentOrder(payload.data.order);
+      setSelectedQuantities({});
+      setOrderStatus(payload.message);
+      setLookupStatus(
+        `Active pending order ${payload.data.order.id.slice(-6)} loaded for table ${tableNumber.trim()}`,
+      );
+    } catch (error) {
+      setOrderStatus(error.message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleMarkPaid() {
+    if (!employee?.restaurant?.id || !currentOrder?.id) {
+      return;
+    }
+
+    setMarkingPaid(true);
+    setOrderStatus("Marking order as paid...");
+
+    try {
+      const payload = await requestJson(
+        `/waiter/orders/${currentOrder.id}/payment`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            restaurantId: employee.restaurant.id,
+            paymentStatus: "paid",
+          }),
+        },
+      );
+
+      setCurrentOrder((order) =>
+        order ? { ...order, paymentStatus: "paid" } : order,
+      );
+      setOrderStatus(payload.message);
+      setLookupStatus(`Table ${currentOrder.tableNumber} is now paid`);
+    } catch (error) {
+      setOrderStatus(error.message);
+    } finally {
+      setMarkingPaid(false);
+    }
+  }
+
+  if (!employee?.restaurant?.id || employee?.member?.role !== "waiter") {
+    return (
+      <EmployeePortalLoginCard
+        role="waiter"
+        form={loginForm}
+        onChange={(event) =>
+          setLoginForm((current) => ({
+            ...current,
+            [event.target.name]: event.target.value,
+          }))
+        }
+        onSubmit={handleEmployeeLogin}
+        loading={loginLoading}
+        status={loginStatus}
+      />
+    );
+  }
+
+  return (
+    <main className="page-shell owner-shell">
+      <section className="hero-card owner-hero">
+        <div>
+          <p className="section-label">Waiter Portal</p>
+          <h1>{restaurant?.name ?? employee.restaurant.name}</h1>
+          <p className="hero-text">
+            Take table-side orders, append to the current pending bill, and
+            close the table once payment is collected.
+          </p>
+        </div>
+        <div className="hero-actions">
+          <span className="badge ghost">{menuStatus}</span>
+          <span className="badge">
+            {employee.member.name || employee.member.employeeId}
+          </span>
+          <form className="stack-form" onSubmit={handleTableLookup}>
+            <label>
+              <span>Table Number</span>
+              <input
+                value={tableNumber}
+                onChange={(event) => {
+                  const nextTableNumber = event.target.value;
+
+                  setTableNumber(nextTableNumber);
+
+                  if (currentOrder?.tableNumber !== nextTableNumber.trim()) {
+                    setCurrentOrder(null);
+                    setLookupStatus("Press Load Table to fetch the active order");
+                  }
+                }}
+                placeholder="Enter table number"
+                required
+              />
+            </label>
+            <button className="secondary-button" type="submit">
+              Load Table
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => {
+                setEmployee(null);
+                setRestaurant(null);
+                setCurrentOrder(null);
+                setSelectedQuantities({});
+                setMenuStatus("Waiter logged out");
+              }}
+            >
+              Logout
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <section className="content-grid">
+        <section className="panel" style={{ gridColumn: "span 8" }}>
+          <div className="panel-heading">
+            <div>
+              <p className="section-label">Menu</p>
+              <h2>Build an order</h2>
+            </div>
+            <p className="status-text">{lookupStatus}</p>
+          </div>
+
+          <div className="menu-grid">
+            {recipes.length === 0 ? (
+              <p className="empty-state">No dishes available for this restaurant.</p>
+            ) : (
+              recipes.map((item) => {
+                const quantity =
+                  selectedQuantities[normalizeRecipeId(item.id)] ?? 0;
+
+                return (
+                  <article
+                    className="dish-card"
+                    key={normalizeRecipeId(item.id)}
+                  >
+                    <div className="dish-head">
+                      <div>
+                        <h3 className="dish-title">{item.title}</h3>
+                        <p className="ingredients">
+                          {item.ingredients?.join(" • ") ||
+                            "Ingredients will be updated soon"}
+                        </p>
+                      </div>
+                      <span className="price-pill">{formatPrice(item.price)}</span>
+                    </div>
+                    <div className="quantity-row">
+                      <p className="price-note">Add items for the selected table.</p>
+                      <div className="quantity-controls">
+                        <button
+                          className="quantity-button"
+                          type="button"
+                          onClick={() => updateQuantity(item.id, quantity - 1)}
+                        >
+                          -
+                        </button>
+                        <span className="quantity-value">{quantity}</span>
+                        <button
+                          className="quantity-button"
+                          type="button"
+                          onClick={() => updateQuantity(item.id, quantity + 1)}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })
+            )}
+          </div>
+        </section>
+
+        <aside className="panel order-panel" style={{ gridColumn: "span 4" }}>
+          <div className="panel-heading">
+            <div>
+              <p className="section-label">Table Summary</p>
+              <h2>{tableNumber.trim() ? `Table ${tableNumber.trim()}` : "Select table"}</h2>
+            </div>
+            <p className="status-text">{orderStatus}</p>
+          </div>
+
+          {currentOrder ? (
+            <article className="order-card compact-order-card">
+              <div className="order-card-head">
+                <div className="card-copy">
+                  <h3>Order {currentOrder.id.slice(-6)}</h3>
+                  <p className="card-meta">
+                    {new Date(currentOrder.time).toLocaleString("en-IN")}
+                  </p>
+                </div>
+                <span
+                  className={`badge ${
+                    currentOrder.paymentStatus === "paid" ? "success-badge" : ""
+                  }`}
+                >
+                  {currentOrder.paymentStatus}
+                </span>
+              </div>
+              <div className="order-status-strip">
+                <span className="metric-label">Kitchen status</span>
+                <strong>{currentOrder.orderStatus}</strong>
+              </div>
+              <div className="order-lines">
+                {currentOrder.items.map((item) => (
+                  <div
+                    className="order-line compact-order-line"
+                    key={`${currentOrder.id}-${item.recipeId}`}
+                  >
+                    <span>
+                      {item.title} x {item.quantity}
+                    </span>
+                    <strong>{formatPrice(item.lineTotal)}</strong>
+                  </div>
+                ))}
+              </div>
+              <div className="order-total-row">
+                <span>Pending total</span>
+                <strong>{formatPrice(currentOrder.totalPrice)}</strong>
+              </div>
+              {currentOrder.paymentStatus !== "paid" ? (
+                <button
+                  className="primary-button order-action-button"
+                  type="button"
+                  onClick={handleMarkPaid}
+                  disabled={markingPaid}
+                >
+                  {markingPaid ? "Marking..." : "Mark as Paid"}
+                </button>
+              ) : null}
+            </article>
+          ) : (
+            <p className="empty-state">
+              No pending order loaded for this table yet.
+            </p>
+          )}
+
+          {selectedItems.length === 0 ? (
+            <p className="empty-state">No new items selected.</p>
+          ) : (
+            <div className="owner-list">
+              {selectedItems.map((item) => (
+                <article
+                  className="owner-list-item"
+                  key={normalizeRecipeId(item.id)}
+                >
+                  <div>
+                    <h3>{item.title}</h3>
+                    <p>
+                      {item.quantity} x {formatPrice(item.price)}
+                    </p>
+                  </div>
+                  <strong>{formatPrice(item.quantity * item.price)}</strong>
+                </article>
+              ))}
+            </div>
+          )}
+
+          <div className="order-total-row">
+            <span>New items total</span>
+            <strong>{formatPrice(selectedTotal)}</strong>
+          </div>
+
+          <button
+            className="primary-button place-order-button"
+            type="button"
+            onClick={handleSubmitOrder}
+            disabled={!canSubmitToTable || submitting}
+          >
+            {submitting
+              ? "Saving..."
+              : hasPendingOrder
+                ? "Add to Pending Order"
+                : "Create Pending Order"}
+          </button>
+        </aside>
+      </section>
+    </main>
+  );
+}
+
 function CustomerMenuPage() {
   const searchParams = new URLSearchParams(window.location.search);
   const restaurantId = searchParams.get("restaurantId");
@@ -2260,7 +3179,7 @@ function CustomerMenuPage() {
   const selectedItems = recipes
     .map((item) => ({
       ...item,
-      quantity: selectedQuantities[item.id] ?? 0,
+      quantity: selectedQuantities[normalizeRecipeId(item.id)] ?? 0,
     }))
     .filter((item) => item.quantity > 0);
   const totalPrice = selectedItems.reduce(
@@ -2269,13 +3188,15 @@ function CustomerMenuPage() {
   );
 
   function updateQuantity(recipeId, nextQuantity) {
+    const normalizedRecipeId = normalizeRecipeId(recipeId);
+
     setSelectedQuantities((current) => {
       const nextState = { ...current };
 
       if (nextQuantity <= 0) {
-        delete nextState[recipeId];
+        delete nextState[normalizedRecipeId];
       } else {
-        nextState[recipeId] = nextQuantity;
+        nextState[normalizedRecipeId] = nextQuantity;
       }
 
       return nextState;
@@ -2300,7 +3221,7 @@ function CustomerMenuPage() {
           restaurantId: restaurant.id,
           tableNumber,
           items: selectedItems.map((item) => ({
-            recipeId: item.id,
+            recipeId: normalizeRecipeId(item.id),
             quantity: item.quantity,
           })),
         }),
@@ -2375,10 +3296,14 @@ function CustomerMenuPage() {
               </p>
             ) : (
               recipes.map((item) => {
-                const quantity = selectedQuantities[item.id] ?? 0;
+                const quantity =
+                  selectedQuantities[normalizeRecipeId(item.id)] ?? 0;
 
                 return (
-                  <article className="dish-card" key={item.id}>
+                  <article
+                    className="dish-card"
+                    key={normalizeRecipeId(item.id)}
+                  >
                     <div className="dish-head">
                       <div>
                         <h3 className="dish-title">{item.title}</h3>
@@ -2434,7 +3359,10 @@ function CustomerMenuPage() {
           ) : (
             <div className="owner-list">
               {selectedItems.map((item) => (
-                <article className="owner-list-item" key={item.id}>
+                <article
+                  className="owner-list-item"
+                  key={normalizeRecipeId(item.id)}
+                >
                   <div>
                     <h3>{item.title}</h3>
                     <p>
@@ -2484,6 +3412,9 @@ function HomePage() {
           <Link className="secondary-button link-button" to="/chef">
             Open Chef Portal
           </Link>
+          <Link className="secondary-button link-button" to="/waiter">
+            Open Waiter Portal
+          </Link>
           <Link className="secondary-button link-button" to="/menu">
             Open Menu Route
           </Link>
@@ -2500,6 +3431,7 @@ export default function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/owner" element={<OwnerPortalPage />} />
         <Route path="/chef" element={<ChefPortalPage />} />
+        <Route path="/waiter" element={<WaiterPortalPage />} />
         <Route path="/menu" element={<CustomerMenuPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
