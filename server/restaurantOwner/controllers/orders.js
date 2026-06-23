@@ -1,6 +1,7 @@
 import Order from "../../models/orders.js";
 import Restaurant from "../../models/restaurant.js";
 import logger from "../../utils/logger.js";
+import { resolveCallerRestaurantId } from "../../utils/authScope.js";
 
 function normalizeRequestedItems(items) {
   const quantityByRecipeId = new Map();
@@ -149,12 +150,13 @@ async function createOrder(request, reply) {
 
 async function getOrdersByRestaurant(request, reply) {
   try {
-    const restaurantId = request.query.restaurant_id?.toString?.().trim();
+    // Scope to the caller's own restaurant, taken from the verified token.
+    const restaurantId = await resolveCallerRestaurantId(request);
 
     if (!restaurantId) {
-      return reply.code(400).send({
+      return reply.code(404).send({
         status: "error",
-        message: "restaurant_id query parameter is required",
+        message: "No restaurant is associated with this account",
       });
     }
 
@@ -211,13 +213,20 @@ async function updateOrderPaymentStatus(request, reply) {
   try {
     const orderId = request.params.orderId?.toString?.().trim();
     const reqBody = request.body ?? {};
-    const restaurantId = reqBody.restaurantId?.toString?.().trim();
     const paymentStatus = reqBody.paymentStatus?.toString?.().trim();
+    const restaurantId = await resolveCallerRestaurantId(request);
 
-    if (!orderId || !restaurantId || !paymentStatus) {
+    if (!orderId || !paymentStatus) {
       return reply.code(400).send({
         status: "error",
-        message: "orderId, restaurantId and paymentStatus are required",
+        message: "orderId and paymentStatus are required",
+      });
+    }
+
+    if (!restaurantId) {
+      return reply.code(404).send({
+        status: "error",
+        message: "No restaurant is associated with this account",
       });
     }
 
@@ -285,14 +294,19 @@ async function updateOrderPaymentStatus(request, reply) {
 async function generateOrderBill(request, reply) {
   try {
     const orderId = request.params.orderId?.toString?.().trim();
-    const restaurantId =
-      request.query.restaurant_id?.toString?.().trim() ??
-      request.query.restaurantId?.toString?.().trim();
+    const restaurantId = await resolveCallerRestaurantId(request);
 
-    if (!orderId || !restaurantId) {
+    if (!orderId) {
       return reply.code(400).send({
         status: "error",
-        message: "orderId and restaurant_id are required",
+        message: "orderId is required",
+      });
+    }
+
+    if (!restaurantId) {
+      return reply.code(404).send({
+        status: "error",
+        message: "No restaurant is associated with this account",
       });
     }
 

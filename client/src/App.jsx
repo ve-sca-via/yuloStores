@@ -1,6 +1,31 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
+// Data layer. Screens call requestJson() and never touch fetch directly, so the
+// app can run against mock JSON (default) or the real backend via one env flag.
+// See src/api/config.js and src/mocks/.
+import { requestJson, readToken, storeToken } from "./api";
+import OwnerDashboard from "./screens/OwnerDashboard";
+import MenuManagement from "./screens/MenuManagement";
+import QrManagement from "./screens/QrManagement";
+import Offers from "./screens/Offers";
+import ManageOrders from "./screens/ManageOrders";
+import Cancellations from "./screens/Cancellations";
+import MenuItems from "./screens/MenuItems";
+import StoreSettings from "./screens/StoreSettings";
+import BillDetails from "./screens/BillDetails";
+import Profile from "./screens/Profile";
+import ChefDashboard from "./screens/ChefDashboard";
+import ManagerDashboard from "./screens/manager/ManagerDashboard";
+import ManagerLiveMonitoring from "./screens/manager/ManagerLiveMonitoring";
+import ManagerOrders from "./screens/manager/ManagerOrders";
+import ManagerRequests from "./screens/manager/ManagerRequests";
+import ManagerTables from "./screens/manager/ManagerTables";
+import CustomerApp from "./screens/customer/CustomerApp";
+import WaiterApp from "./screens/waiter/WaiterApp";
+import AdminApp from "./screens/admin/AdminApp";
+import PanelSwitcher from "./components/PanelSwitcher";
+
 const OWNER_STORAGE_KEY = "yulo_owner_session";
 const EMPLOYEE_STORAGE_KEY = "yulo_employee_session";
 
@@ -40,17 +65,6 @@ function storeEmployee(employee) {
   }
 
   window.localStorage.setItem(EMPLOYEE_STORAGE_KEY, JSON.stringify(employee));
-}
-
-async function requestJson(url, options = {}) {
-  const response = await fetch(url, options);
-  const payload = await response.json();
-
-  if (!response.ok || payload?.status === "error") {
-    throw new Error(payload?.message || "Request failed");
-  }
-
-  return payload;
 }
 
 function normalizeOwner(owner) {
@@ -558,6 +572,7 @@ function OwnerPortalPage() {
         body: JSON.stringify(authForm),
       });
 
+      storeToken(payload.data.token);
       const nextOwner = normalizeOwner(payload.data.owner);
       setOwner(nextOwner);
       setAuthStatus(payload.message);
@@ -1246,6 +1261,7 @@ function OwnerPortalPage() {
     } catch (_error) {
       // Local logout still applies if backend session clear fails.
     } finally {
+      storeToken(null);
       setOwner(null);
       setMenuItems([]);
       setExpenseItems([]);
@@ -2524,6 +2540,7 @@ function ChefPortalPage() {
         throw new Error("These credentials do not belong to a chef account");
       }
 
+      storeToken(payload.data.token);
       setEmployee(nextEmployee);
       setLoginStatus(payload.message);
       setPortalStatus("Chef authenticated successfully");
@@ -2624,6 +2641,7 @@ function ChefPortalPage() {
             className="secondary-button"
             type="button"
             onClick={() => {
+              storeToken(null);
               setEmployee(null);
               setPortalStatus("Chef logged out");
             }}
@@ -2790,6 +2808,7 @@ function WaiterPortalPage() {
         throw new Error("These credentials do not belong to a waiter account");
       }
 
+      storeToken(payload.data.token);
       setEmployee(nextEmployee);
       setRestaurant(nextEmployee.restaurant);
       setLoginStatus(payload.message);
@@ -2969,6 +2988,7 @@ function WaiterPortalPage() {
               className="secondary-button"
               type="button"
               onClick={() => {
+                storeToken(null);
                 setEmployee(null);
                 setRestaurant(null);
                 setCurrentOrder(null);
@@ -3426,15 +3446,60 @@ function HomePage() {
 
 export default function App() {
   return (
-    <AppShell>
+    <>
+      <PanelSwitcher />
       <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/owner" element={<OwnerPortalPage />} />
-        <Route path="/chef" element={<ChefPortalPage />} />
-        <Route path="/waiter" element={<WaiterPortalPage />} />
-        <Route path="/menu" element={<CustomerMenuPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+      {/* New Figma screens render full-screen with the shared sidebar layout.
+          `/` is the landing page so `npm run dev` opens straight to the dashboard. */}
+      <Route path="/" element={<OwnerDashboard />} />
+      <Route path="/dashboard" element={<OwnerDashboard />} />
+      <Route path="/menu-management" element={<MenuManagement />} />
+
+      {/* Owner panel screens. */}
+      <Route path="/qr" element={<QrManagement />} />
+      <Route path="/offers" element={<Offers />} />
+      <Route path="/orders" element={<ManageOrders />} />
+      <Route path="/bill" element={<BillDetails />} />
+      <Route path="/cancellations" element={<Cancellations />} />
+      <Route path="/menu-items" element={<MenuItems />} />
+      <Route path="/store-settings" element={<StoreSettings />} />
+      <Route path="/profile" element={<Profile />} />
+
+      {/* Customer QR ordering app — mobile-first, its own nested routes. */}
+      <Route path="/order/*" element={<CustomerApp />} />
+
+      {/* Staff portals — distinct layouts (kitchen display / light sidebar). */}
+      <Route path="/chef" element={<ChefDashboard />} />
+      <Route path="/waiter/*" element={<WaiterApp />} />
+
+      {/* Manager portal — unique screens (shares the dark sidebar chrome). */}
+      <Route path="/manager" element={<ManagerDashboard />} />
+      <Route path="/manager/dashboard" element={<ManagerDashboard />} />
+      <Route path="/manager/orders" element={<ManagerOrders />} />
+      <Route path="/manager/live" element={<ManagerLiveMonitoring />} />
+      <Route path="/manager/requests" element={<ManagerRequests />} />
+      <Route path="/manager/tables" element={<ManagerTables />} />
+
+      {/* Platform Admin portal — its own platform sidebar + nested routes. */}
+      <Route path="/admin/*" element={<AdminApp />} />
+
+      {/* Legacy debug UI keeps the old top-nav shell. */}
+      <Route
+        path="*"
+        element={
+          <AppShell>
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/owner" element={<OwnerPortalPage />} />
+              <Route path="/chef" element={<ChefPortalPage />} />
+              <Route path="/waiter" element={<WaiterPortalPage />} />
+              <Route path="/menu" element={<CustomerMenuPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </AppShell>
+        }
+      />
       </Routes>
-    </AppShell>
+    </>
   );
 }

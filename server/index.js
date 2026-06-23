@@ -1,28 +1,17 @@
 import "dotenv/config";
-import fastify from "fastify";
-import chefRoutes from "./chefPortal/chefRoutes.js";
-import restaurantOwnerRoutes from "./restaurantOwner/restaurantRoutes.js";
-import waiterRoutes from "./waiterPortal/waiterRoutes.js";
+import buildApp from "./buildApp.js";
 import logger from "./utils/logger.js";
 import { mongoConnect } from "./config/mongoConnector.js";
 
-const app = fastify({
-  logger: true,
-});
-
-await mongoConnect();
-app.get("/", async () => {
-  return { message: "Server is running" };
-});
-
-app.register(restaurantOwnerRoutes);
-app.register(chefRoutes);
-app.register(waiterRoutes);
-
 const start = async () => {
   try {
-    await app.listen({ port: 3000, host: "0.0.0.0" });
-    logger.info("Server started on http://0.0.0.0:3000");
+    await mongoConnect();
+
+    const app = await buildApp();
+    const port = Number(process.env.PORT) || 3000;
+
+    await app.listen({ port, host: "0.0.0.0" });
+    logger.info(`Server started on http://0.0.0.0:${port}`);
   } catch (err) {
     logger.error("Failed to start server", err);
     process.exit(1);

@@ -1,4 +1,7 @@
 import mongoose from "mongoose";
+import bcrypt from "bcryptjs";
+
+const SALT_ROUNDS = 10;
 
 const staffMemberSchema = new mongoose.Schema(
   {
@@ -16,6 +19,23 @@ const staffMemberSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+// Subdocument save hooks run when the parent restaurant is saved. The
+// isModified guard means existing members are never re-hashed on unrelated
+// restaurant updates (inventory, menu, etc.).
+staffMemberSchema.pre("save", async function hashStaffPassword() {
+  if (!this.isModified("password") || !this.password) {
+    return;
+  }
+
+  this.password = await bcrypt.hash(this.password, SALT_ROUNDS);
+});
+
+staffMemberSchema.methods.comparePassword = function comparePassword(
+  candidatePassword,
+) {
+  return bcrypt.compare(candidatePassword, this.password);
+};
 
 const restaurantSchema = new mongoose.Schema({
   name: { type: String, required: true },

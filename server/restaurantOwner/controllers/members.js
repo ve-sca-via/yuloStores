@@ -1,7 +1,6 @@
 import logger from "../../utils/logger.js";
 import Restaurant from "../../models/restaurant.js";
 import RestaurantOwner from "../../models/restaurantOwner.js";
-import { getLoggedInOwnerId } from "../../utils/restaurantOwnerSession.js";
 
 function serializeStaffMember(member) {
   return {
@@ -45,10 +44,7 @@ async function getOwnerAndRestaurant(ownerId) {
 
 async function addEmployeeMember(request, reply) {
   try {
-    const ownerId =
-      request.body?.ownerId?.trim?.() ??
-      request.body?.ownerId ??
-      (await getLoggedInOwnerId());
+    const ownerId = request.ownerId;
     const role = request.body?.role?.toString?.().trim();
     const employeeId = request.body?.employeeId?.trim?.().toLowerCase();
     const password = request.body?.password?.toString?.();
@@ -147,17 +143,25 @@ async function loginEmployeeMember(request, reply) {
       (staffMember) => staffMember.employeeId === employeeId,
     );
 
-    if (!member || member.password !== password) {
+    if (!member || !(await member.comparePassword(password))) {
       return reply.code(401).send({
         status: "error",
         message: "Invalid employeeId or password",
       });
     }
 
+    const token = await reply.jwtSign({
+      sub: member._id.toString(),
+      type: "employee",
+      role: member.role,
+      restaurantId: restaurant._id.toString(),
+    });
+
     return reply.send({
       status: "success",
       message: "Employee login successful",
       data: {
+        token,
         member: serializeStaffMember(member),
         restaurant: {
           id: restaurant._id,

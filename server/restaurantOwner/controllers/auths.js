@@ -1,9 +1,5 @@
 import logger from "../../utils/logger.js";
 import RestaurantOwner from "../../models/restaurantOwner.js";
-import {
-  clearLoggedInOwnerId,
-  saveLoggedInOwnerId,
-} from "../../utils/restaurantOwnerSession.js";
 
 function serializeRestaurant(restaurant) {
   if (!restaurant) {
@@ -64,10 +60,16 @@ async function restaurentOwnerSignup(request, reply) {
 
     logger.info(`Restaurant owner signup successful for email: ${email}`);
 
+    const token = await reply.jwtSign({
+      sub: owner._id.toString(),
+      type: "owner",
+    });
+
     return reply.code(201).send({
       status: "success",
       message: "Restaurant owner created successfully",
       data: {
+        token,
         owner: {
           id: owner._id,
           name: owner.name,
@@ -105,7 +107,7 @@ async function restaurentOwnerLogin(request, reply) {
       "restaurant",
     );
 
-    if (!owner || owner.password !== password) {
+    if (!owner || !(await owner.comparePassword(password))) {
       logger.warn(`Restaurant owner login failed for email: ${email}`);
 
       return reply.code(401).send({
@@ -114,7 +116,10 @@ async function restaurentOwnerLogin(request, reply) {
       });
     }
 
-    await saveLoggedInOwnerId(owner._id.toString());
+    const token = await reply.jwtSign({
+      sub: owner._id.toString(),
+      type: "owner",
+    });
 
     logger.info(`Restaurant owner login attempt for email: ${email}`);
 
@@ -122,14 +127,12 @@ async function restaurentOwnerLogin(request, reply) {
       status: "success",
       message: "Login successful",
       data: {
+        token,
         owner: {
           id: owner._id,
           name: owner.name,
           email: owner.email,
           restaurant: serializeRestaurant(owner.restaurant),
-        },
-        session: {
-          ownerId: owner._id,
         },
       },
     });
@@ -145,15 +148,8 @@ async function restaurentOwnerLogin(request, reply) {
 
 async function getRestaurantOwnerProfile(request, reply) {
   try {
-    const ownerId =
-      request.query.ownerId?.toString?.().trim() ?? request.params.ownerId;
-
-    if (!ownerId) {
-      return reply.code(400).send({
-        status: "error",
-        message: "ownerId is required",
-      });
-    }
+    // Identity comes from the verified token, never the request.
+    const ownerId = request.ownerId;
 
     const owner = await RestaurantOwner.findById(ownerId).populate("restaurant");
 
@@ -187,13 +183,14 @@ async function getRestaurantOwnerProfile(request, reply) {
 
 async function updateRestaurantOwnerProfile(request, reply) {
   try {
-    const ownerId = request.params.ownerId?.toString?.().trim();
+    // Owners can only edit their own profile — id from the token, not the path.
+    const ownerId = request.ownerId;
     const reqBody = request.body ?? {};
     const name = reqBody.name?.trim();
     const email = reqBody.email?.trim?.().toLowerCase();
     const password = reqBody.password;
 
-    if (!ownerId || !name || !email) {
+    if (!name || !email) {
       return reply.code(400).send({
         status: "error",
         message: "ownerId, name and email are required",
@@ -255,21 +252,12 @@ async function updateRestaurantOwnerProfile(request, reply) {
 }
 
 async function restaurantOwnerLogout(_request, reply) {
-  try {
-    await clearLoggedInOwnerId();
-
-    return reply.send({
-      status: "success",
-      message: "Logout successful",
-    });
-  } catch (error) {
-    logger.error(`Error from restaurantOwnerLogout: ${error.message}`);
-
-    return reply.code(500).send({
-      status: "error",
-      message: "Unable to logout restaurant owner",
-    });
-  }
+  // With stateless JWTs there is no server-side session to clear; the client
+  // discards its stored token. Kept as an endpoint for client compatibility.
+  return reply.send({
+    status: "success",
+    message: "Logout successful",
+  });
 }
 
 export {

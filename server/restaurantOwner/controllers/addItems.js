@@ -2,7 +2,6 @@ import logger from "../../utils/logger.js";
 import Expense from "../../models/expenses.js";
 import Restaurant from "../../models/restaurant.js";
 import RestaurantOwner from "../../models/restaurantOwner.js";
-import { getLoggedInOwnerId } from "../../utils/restaurantOwnerSession.js";
 
 async function getOwnerAndRestaurant(ownerId) {
   const owner = await RestaurantOwner.findById(ownerId);
@@ -47,10 +46,7 @@ function serializeRestaurant(restaurant) {
 async function registerRestaurants(request, reply) {
   try {
     const reqBody = request.body ?? {};
-    const ownerId =
-      reqBody.ownerId?.trim?.() ??
-      reqBody.ownerId ??
-      (await getLoggedInOwnerId());
+    const ownerId = request.ownerId;
     const name = reqBody.name?.trim();
 
     if (!ownerId || !name) {
@@ -119,10 +115,7 @@ async function registerRestaurants(request, reply) {
 async function addItems(request, reply) {
   try {
     const reqBody = request.body ?? {};
-    const ownerId =
-      reqBody.ownerId?.trim?.() ??
-      reqBody.ownerId ??
-      (await getLoggedInOwnerId());
+    const ownerId = request.ownerId;
     const inputRecipes = Array.isArray(reqBody.recipes)
       ? reqBody.recipes
       : [
@@ -242,10 +235,7 @@ async function addItems(request, reply) {
 
 async function updateRestaurant(request, reply) {
   try {
-    const ownerId =
-      request.body?.ownerId?.trim?.() ??
-      request.body?.ownerId ??
-      (await getLoggedInOwnerId());
+    const ownerId = request.ownerId;
     const name = request.body?.name?.trim();
 
     if (!ownerId || !name) {
@@ -293,10 +283,7 @@ async function updateRestaurant(request, reply) {
 
 async function addStaffMember(request, reply) {
   try {
-    const ownerId =
-      request.body?.ownerId?.trim?.() ??
-      request.body?.ownerId ??
-      (await getLoggedInOwnerId());
+    const ownerId = request.ownerId;
     const role = request.body?.role?.toString?.().trim();
     const name = request.body?.name?.trim?.();
     const email = request.body?.email?.trim?.().toLowerCase();
@@ -367,10 +354,7 @@ async function addStaffMember(request, reply) {
 async function deleteStaffMember(request, reply) {
   try {
     const memberId = request.params.memberId?.toString?.().trim();
-    const ownerId =
-      request.body?.ownerId?.trim?.() ??
-      request.body?.ownerId ??
-      (await getLoggedInOwnerId());
+    const ownerId = request.ownerId;
 
     if (!ownerId || !memberId) {
       return reply.code(400).send({
@@ -427,10 +411,7 @@ async function deleteStaffMember(request, reply) {
 async function updateMenuItem(request, reply) {
   try {
     const itemId = request.params.itemId?.toString?.().trim();
-    const ownerId =
-      request.body?.ownerId?.trim?.() ??
-      request.body?.ownerId ??
-      (await getLoggedInOwnerId());
+    const ownerId = request.ownerId;
     const title = request.body?.title?.trim?.();
     const ingredients = Array.isArray(request.body?.ingredients)
       ? request.body.ingredients
@@ -504,10 +485,7 @@ async function updateMenuItem(request, reply) {
 async function deleteMenuItem(request, reply) {
   try {
     const itemId = request.params.itemId?.toString?.().trim();
-    const ownerId =
-      request.body?.ownerId?.trim?.() ??
-      request.body?.ownerId ??
-      (await getLoggedInOwnerId());
+    const ownerId = request.ownerId;
 
     if (!itemId || !ownerId) {
       return reply.code(400).send({
@@ -565,10 +543,7 @@ async function deleteMenuItem(request, reply) {
 async function addInventory(request, reply) {
   try {
     const reqBody = request.body ?? {};
-    const ownerId =
-      reqBody.ownerId?.trim?.() ??
-      reqBody.ownerId ??
-      (await getLoggedInOwnerId());
+    const ownerId = request.ownerId;
     const inputStocks = Array.isArray(reqBody.items)
       ? reqBody.items
       : [
@@ -703,21 +678,21 @@ async function addInventory(request, reply) {
 
 async function getInventory(request, reply) {
   try {
-    const restaurantId = request.query.restaurant_id?.toString?.().trim();
+    // Restaurant is derived from the authenticated owner, not the query, so an
+    // owner can only ever read their own inventory.
+    const { owner, restaurant } = await getOwnerAndRestaurant(request.ownerId);
 
-    if (!restaurantId) {
-      return reply.code(400).send({
+    if (!owner) {
+      return reply.code(404).send({
         status: "error",
-        message: "restaurant_id query parameter is required",
+        message: "Restaurant owner not found",
       });
     }
-
-    const restaurant = await Restaurant.findById(restaurantId).lean();
 
     if (!restaurant) {
       return reply.code(404).send({
         status: "error",
-        message: "Restaurant not found",
+        message: "Restaurant not registered for this owner",
       });
     }
 
@@ -752,10 +727,7 @@ async function getInventory(request, reply) {
 async function addExpense(request, reply) {
   try {
     const reqBody = request.body ?? {};
-    const ownerId =
-      reqBody.ownerId?.trim?.() ??
-      reqBody.ownerId ??
-      (await getLoggedInOwnerId());
+    const ownerId = request.ownerId;
     const title = reqBody.title?.trim?.() || reqBody.name?.trim?.();
     const amount = Number(reqBody.amount);
     const note = reqBody.note?.toString?.().trim() ?? "";
@@ -833,25 +805,23 @@ async function addExpense(request, reply) {
 
 async function getExpenses(request, reply) {
   try {
-    const restaurantId =
-      request.query.restaurant_id?.toString?.().trim() ??
-      request.query.restaurantId?.toString?.().trim();
+    const { owner, restaurant } = await getOwnerAndRestaurant(request.ownerId);
 
-    if (!restaurantId) {
-      return reply.code(400).send({
+    if (!owner) {
+      return reply.code(404).send({
         status: "error",
-        message: "restaurant_id query parameter is required",
+        message: "Restaurant owner not found",
       });
     }
-
-    const restaurant = await Restaurant.findById(restaurantId).lean();
 
     if (!restaurant) {
       return reply.code(404).send({
         status: "error",
-        message: "Restaurant not found",
+        message: "Restaurant not registered for this owner",
       });
     }
+
+    const restaurantId = restaurant._id;
 
     const [storedExpenses, legacyExpenses] = await Promise.all([
       Expense.find({ restaurant_id: restaurantId }).sort({ time: -1 }).lean(),
@@ -905,10 +875,7 @@ async function getExpenses(request, reply) {
 async function deleteExpense(request, reply) {
   try {
     const expenseId = request.params.expenseId?.toString?.().trim();
-    const ownerId =
-      request.body?.ownerId?.trim?.() ??
-      request.body?.ownerId ??
-      (await getLoggedInOwnerId());
+    const ownerId = request.ownerId;
 
     if (!expenseId || !ownerId) {
       return reply.code(400).send({
@@ -987,10 +954,7 @@ async function updateInventoryItem(request, reply) {
   try {
     const inventoryId = request.params.inventoryId?.toString?.().trim();
     const reqBody = request.body ?? {};
-    const ownerId =
-      reqBody.ownerId?.trim?.() ??
-      reqBody.ownerId ??
-      (await getLoggedInOwnerId());
+    const ownerId = request.ownerId;
     const name = reqBody.name?.trim?.();
     const quantity = Number(reqBody.quantity);
     const unit = reqBody.unit?.trim?.() || "kg";
@@ -1080,10 +1044,7 @@ async function deleteInventoryItem(request, reply) {
   try {
     const inventoryId = request.params.inventoryId?.toString?.().trim();
     const reqBody = request.body ?? {};
-    const ownerId =
-      reqBody.ownerId?.trim?.() ??
-      reqBody.ownerId ??
-      (await getLoggedInOwnerId());
+    const ownerId = request.ownerId;
 
     if (!inventoryId || !ownerId) {
       return reply.code(400).send({
@@ -1143,10 +1104,7 @@ async function deleteInventoryItem(request, reply) {
 async function addInventoryMovement(request, reply) {
   try {
     const inventoryId = request.params.inventoryId?.toString?.().trim();
-    const ownerId =
-      request.body?.ownerId?.trim?.() ??
-      request.body?.ownerId ??
-      (await getLoggedInOwnerId());
+    const ownerId = request.ownerId;
     const type = request.body?.type?.toString?.().trim();
     const quantity = Number(request.body?.quantity);
     const note = request.body?.note?.toString?.().trim() ?? "";
@@ -1231,25 +1189,23 @@ async function addInventoryMovement(request, reply) {
 
 async function getRestaurantAnalytics(request, reply) {
   try {
-    const restaurantId =
-      request.query.restaurant_id?.toString?.().trim() ??
-      request.query.restaurantId?.toString?.().trim();
+    const { owner, restaurant } = await getOwnerAndRestaurant(request.ownerId);
 
-    if (!restaurantId) {
-      return reply.code(400).send({
+    if (!owner) {
+      return reply.code(404).send({
         status: "error",
-        message: "restaurant_id query parameter is required",
+        message: "Restaurant owner not found",
       });
     }
-
-    const restaurant = await Restaurant.findById(restaurantId).lean();
 
     if (!restaurant) {
       return reply.code(404).send({
         status: "error",
-        message: "Restaurant not found",
+        message: "Restaurant not registered for this owner",
       });
     }
+
+    const restaurantId = restaurant._id;
 
     const Order = (await import("../../models/orders.js")).default;
     const paidOrders = await Order.find({

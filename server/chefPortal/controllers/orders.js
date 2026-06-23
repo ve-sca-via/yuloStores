@@ -1,17 +1,16 @@
 import Order from "../../models/orders.js";
 import Restaurant from "../../models/restaurant.js";
 import logger from "../../utils/logger.js";
+import { resolveCallerRestaurantId } from "../../utils/authScope.js";
 
 async function getChefOrders(request, reply) {
   try {
-    const restaurantId =
-      request.query.restaurant_id?.toString?.().trim() ??
-      request.query.restaurantId?.toString?.().trim();
+    const restaurantId = await resolveCallerRestaurantId(request);
 
     if (!restaurantId) {
-      return reply.code(400).send({
+      return reply.code(404).send({
         status: "error",
-        message: "restaurant_id query parameter is required",
+        message: "No restaurant is associated with this account",
       });
     }
 
@@ -67,16 +66,21 @@ async function getChefOrders(request, reply) {
 async function updateChefOrderStatus(request, reply) {
   try {
     const orderId = request.params.orderId?.toString?.().trim();
-    const restaurantId =
-      request.body?.restaurantId?.toString?.().trim() ??
-      request.body?.restaurant_id?.toString?.().trim();
+    const restaurantId = await resolveCallerRestaurantId(request);
     const orderStatus = request.body?.orderStatus?.toString?.().trim();
     const allowedStatuses = ["preparing", "completed", "cancelled"];
 
-    if (!orderId || !restaurantId || !orderStatus) {
+    if (!orderId || !orderStatus) {
       return reply.code(400).send({
         status: "error",
-        message: "orderId, restaurantId and orderStatus are required",
+        message: "orderId and orderStatus are required",
+      });
+    }
+
+    if (!restaurantId) {
+      return reply.code(404).send({
+        status: "error",
+        message: "No restaurant is associated with this account",
       });
     }
 

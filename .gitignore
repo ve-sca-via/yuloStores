@@ -1,0 +1,7 @@
+# Local MCP config — contains a Figma API token, never commit it.
+.mcp.json
+
+# Dependencies / build artifacts
+node_modules/
+dist/
+.DS_Store

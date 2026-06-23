@@ -1,6 +1,7 @@
 import Order from "../../models/orders.js";
 import Restaurant from "../../models/restaurant.js";
 import logger from "../../utils/logger.js";
+import { resolveCallerRestaurantId } from "../../utils/authScope.js";
 
 function normalizeRequestedItems(items) {
   const quantityByRecipeId = new Map();
@@ -118,15 +119,20 @@ function isValidRestaurantTable(restaurant, tableNumber) {
 
 async function getPendingWaiterOrder(request, reply) {
   try {
-    const restaurantId =
-      request.query.restaurant_id?.toString?.().trim() ??
-      request.query.restaurantId?.toString?.().trim();
+    const restaurantId = await resolveCallerRestaurantId(request);
     const tableNumber = request.query.tableNumber?.toString?.().trim();
 
-    if (!restaurantId || !tableNumber) {
+    if (!tableNumber) {
       return reply.code(400).send({
         status: "error",
-        message: "restaurant_id and tableNumber query parameters are required",
+        message: "tableNumber query parameter is required",
+      });
+    }
+
+    if (!restaurantId) {
+      return reply.code(404).send({
+        status: "error",
+        message: "No restaurant is associated with this account",
       });
     }
 
@@ -174,14 +180,21 @@ async function getPendingWaiterOrder(request, reply) {
 async function createOrAppendWaiterOrder(request, reply) {
   try {
     const reqBody = request.body ?? {};
-    const restaurantId = reqBody.restaurantId?.toString?.().trim();
+    const restaurantId = await resolveCallerRestaurantId(request);
     const tableNumber = reqBody.tableNumber?.toString?.().trim();
     const items = Array.isArray(reqBody.items) ? reqBody.items : [];
 
-    if (!restaurantId || !tableNumber || items.length === 0) {
+    if (!tableNumber || items.length === 0) {
       return reply.code(400).send({
         status: "error",
-        message: "restaurantId, tableNumber and at least one item are required",
+        message: "tableNumber and at least one item are required",
+      });
+    }
+
+    if (!restaurantId) {
+      return reply.code(404).send({
+        status: "error",
+        message: "No restaurant is associated with this account",
       });
     }
 
