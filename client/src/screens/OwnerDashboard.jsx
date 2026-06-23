@@ -4,6 +4,7 @@
 // Data comes from the mock layer (GET /restaurant_owner/dashboard).
 
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -59,23 +60,27 @@ function statusVariant(status) {
   return "muted";
 }
 
-function PeriodDropdown({ value = "Today" }) {
+const PERIODS = ["Today", "This Week", "This Month"];
+
+function PeriodDropdown({ value, onChange }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
           variant="outline"
           size="sm"
-          className="h-8 gap-1.5 rounded-lg border-brand-cream/70 text-[13px] font-normal text-[#5f5f5f]"
+          className="h-8 gap-1.5 rounded-lg border-brand-cream/70 text-[13px] font-normal text-[#5f5f5f] hover:bg-[#f5ede4] hover:text-[#24190f] focus-visible:ring-0 focus-visible:ring-offset-0"
         >
           {value}
           <ChevronDown className="h-3.5 w-3.5" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem>Today</DropdownMenuItem>
-        <DropdownMenuItem>This Week</DropdownMenuItem>
-        <DropdownMenuItem>This Month</DropdownMenuItem>
+        {PERIODS.map((p) => (
+          <DropdownMenuItem key={p} onClick={() => onChange(p)}>
+            {p}
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -87,7 +92,6 @@ function StatCard({ title, value, delta, caption, up, stars }) {
       <CardContent className="p-[18px]">
         <div className="flex items-center justify-between">
           <span className="text-[13px] text-muted-foreground">{title}</span>
-          <span className="h-[22px] w-[22px] rounded-full bg-brand-orange/10" />
         </div>
         <strong className="mt-2.5 block text-[28px] font-bold leading-none">
           {value}
@@ -125,9 +129,60 @@ function SectionHead({ title, action }) {
   );
 }
 
+const SALES_BARS = {
+  Today: [
+    { label: "10 AM", value: 11000 },
+    { label: "12 PM", value: 21000 },
+    { label: "2 PM", value: 16000 },
+    { label: "4 PM", value: 26000 },
+    { label: "6 PM", value: 19000 },
+    { label: "8 PM", value: 29000 },
+    { label: "10 PM", value: 24000 },
+  ],
+  "This Week": [
+    { label: "Mon", value: 18000 },
+    { label: "Tue", value: 24000 },
+    { label: "Wed", value: 15000 },
+    { label: "Thu", value: 28000 },
+    { label: "Fri", value: 32000 },
+    { label: "Sat", value: 27000 },
+    { label: "Sun", value: 22000 },
+  ],
+  "This Month": [
+    { label: "Wk 1", value: 85000 },
+    { label: "Wk 2", value: 92000 },
+    { label: "Wk 3", value: 78000 },
+    { label: "Wk 4", value: 105000 },
+  ],
+};
+
+const BREAKDOWN_SEGMENTS = {
+  Today: [
+    { label: "Delivered", value: 72, percent: 56, color: "#2E7D32" },
+    { label: "Preparing", value: 28, percent: 22, color: "#D9480F" },
+    { label: "On The Way", value: 18, percent: 14, color: "#F2A65A" },
+    { label: "Cancelled", value: 10, percent: 8, color: "#B11226" },
+  ],
+  "This Week": [
+    { label: "Delivered", value: 410, percent: 58, color: "#2E7D32" },
+    { label: "Preparing", value: 120, percent: 17, color: "#D9480F" },
+    { label: "On The Way", value: 98, percent: 14, color: "#F2A65A" },
+    { label: "Cancelled", value: 78, percent: 11, color: "#B11226" },
+  ],
+  "This Month": [
+    { label: "Delivered", value: 1640, percent: 60, color: "#2E7D32" },
+    { label: "Preparing", value: 480, percent: 18, color: "#D9480F" },
+    { label: "On The Way", value: 380, percent: 14, color: "#F2A65A" },
+    { label: "Cancelled", value: 220, percent: 8, color: "#B11226" },
+  ],
+};
+
 export default function OwnerDashboard() {
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  const [salesPeriod, setSalesPeriod] = useState("Today");
+  const [breakdownPeriod, setBreakdownPeriod] = useState("Today");
 
   useEffect(() => {
     requestJson("/restaurant_owner/dashboard")
@@ -198,10 +253,10 @@ export default function OwnerDashboard() {
         {/* Sales + breakdown */}
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_1fr]">
           <Card>
-            <SectionHead title="Sales Overview" action={<PeriodDropdown />} />
+            <SectionHead title="Sales Overview" action={<PeriodDropdown value={salesPeriod} onChange={setSalesPeriod} />} />
             <CardContent>
               <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={salesOverview.bars} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+                <BarChart data={SALES_BARS[salesPeriod]} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
                   <defs>
                     <linearGradient id="barFill" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#D9480F" />
@@ -228,13 +283,13 @@ export default function OwnerDashboard() {
           </Card>
 
           <Card>
-            <SectionHead title="Order Breakdown" action={<PeriodDropdown />} />
+            <SectionHead title="Order Breakdown" action={<PeriodDropdown value={breakdownPeriod} onChange={setBreakdownPeriod} />} />
             <CardContent>
               <div className="relative mx-auto h-[180px] w-[180px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={orderBreakdown.segments}
+                      data={BREAKDOWN_SEGMENTS[breakdownPeriod]}
                       dataKey="value"
                       nameKey="label"
                       innerRadius={58}
@@ -244,7 +299,7 @@ export default function OwnerDashboard() {
                       endAngle={-270}
                       stroke="none"
                     >
-                      {orderBreakdown.segments.map((s) => (
+                      {BREAKDOWN_SEGMENTS[breakdownPeriod].map((s) => (
                         <Cell key={s.label} fill={s.color} />
                       ))}
                     </Pie>
@@ -252,14 +307,16 @@ export default function OwnerDashboard() {
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                  <strong className="text-2xl font-bold">{orderBreakdown.total}</strong>
+                  <strong className="text-2xl font-bold">
+                    {BREAKDOWN_SEGMENTS[breakdownPeriod].reduce((s, i) => s + i.value, 0)}
+                  </strong>
                   <span className="text-[11px] text-muted-foreground">Total Orders</span>
                 </div>
               </div>
 
               <p className="mb-3 mt-1 text-[13px] font-semibold">Order Status Breakdown</p>
               <div className="grid grid-cols-2 gap-x-4 gap-y-2.5">
-                {orderBreakdown.segments.map((s) => (
+                {BREAKDOWN_SEGMENTS[breakdownPeriod].map((s) => (
                   <div key={s.label} className="flex items-center gap-2 text-xs">
                     <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: s.color }} />
                     <span className="text-muted-foreground">{s.label}</span>
@@ -282,7 +339,7 @@ export default function OwnerDashboard() {
                 Manage active orders and preparation queue
               </p>
             </div>
-            <button type="button" className="text-[13px] font-semibold text-brand-orange">
+            <button type="button" onClick={() => navigate("/orders")} className="text-[13px] font-semibold text-brand-orange">
               View Display →
             </button>
           </CardHeader>
@@ -344,7 +401,7 @@ export default function OwnerDashboard() {
                     <span className="font-semibold">{item.name}</span>
                     <span className="text-xs text-muted-foreground">{item.orders}</span>
                   </div>
-                  <span className="ml-auto font-bold text-brand-red">{item.price}</span>
+                  <span className="ml-auto font-bold text-[#24190F]">{item.price}</span>
                 </div>
               ))}
             </CardContent>

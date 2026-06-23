@@ -106,7 +106,7 @@ export default function QrManagement() {
   return (
     <DashboardLayout>
       <div>
-        <h1 className="text-2xl font-bold">Table QR Management</h1>
+        <h1 className="whitespace-nowrap text-2xl font-bold">Table QR Management</h1>
         <p className="text-sm text-muted-foreground">
           Generate and manage QR codes for restaurant tables.
         </p>
@@ -159,7 +159,18 @@ export default function QrManagement() {
                   QR Code generated successfully
                 </p>
                 <div className="flex gap-2">
-                  <Button variant="outline" className="flex-1 gap-1.5" onClick={() => downloadQr(generated)}>
+                  <Button
+                    variant="outline"
+                    className="flex-1 gap-1.5"
+                    onClick={() => {
+                      downloadQr(generated);
+                      setCodes((prev) => {
+                        const list = prev ?? [];
+                        const alreadyExists = list.some((c) => c.id === generated.id);
+                        return alreadyExists ? list : [generated, ...list];
+                      });
+                    }}
+                  >
                     <Download className="h-3.5 w-3.5" /> Save QR
                   </Button>
                   <Button variant="outline" className="flex-1 gap-1.5" onClick={() => printQr(generated)}>
