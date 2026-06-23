@@ -1,9 +1,6 @@
-// Manage Orders (/orders) — live order dashboard with status filters and
-// workflow actions (PRD §9 Order Lifecycle, §13 OWN-03). Data from the mock
-// layer: GET /restaurant_owner/orders, PATCH /restaurant_owner/orders/:id/status.
-
 import { useEffect, useMemo, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { RefreshCw, X } from "lucide-react";
 
 import { requestJson } from "@/api";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -20,16 +17,15 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
-// Forward workflow: each status maps to the next action label + target status.
-const NEXT_STEP = {
-  new: { label: "Accept", to: "accepted" },
-  accepted: { label: "Start Preparing", to: "preparing" },
-  preparing: { label: "Mark Ready", to: "ready" },
-  ready: { label: "Mark Served", to: "served" },
-  served: { label: "Complete", to: "completed" },
-};
-
-const FILTERS = ["all", "new", "accepted", "preparing", "ready", "served", "completed"];
+const FILTERS = [
+  { value: "all", label: "All Orders" },
+  { value: "new", label: "New" },
+  { value: "preparing", label: "Preparing" },
+  { value: "ready", label: "Ready To Serve" },
+  { value: "bill_generated", label: "Bill Generated" },
+  { value: "completed", label: "Completed" },
+  { value: "cancelled", label: "Cancelled" },
+];
 
 function statusVariant(status) {
   const key = (status ?? "").toLowerCase();
@@ -71,10 +67,168 @@ function StatPill({ label, value, tone }) {
   );
 }
 
+// Split items array into batches of `size` for display
+function toBatches(items, size = 3) {
+  const batches = [];
+  for (let i = 0; i < items.length; i += size) {
+    batches.push(items.slice(i, i + size));
+  }
+  return batches;
+}
+
+function BatchStatusLabel({ index, total, orderStatus }) {
+  const isLast = index === total - 1;
+  const isPrepared = !isLast || orderStatus === "completed" || orderStatus === "served" || orderStatus === "ready";
+  return isPrepared ? (
+    <span className="text-xs font-semibold text-brand-green">Prepared</span>
+  ) : (
+    <span className="text-xs font-semibold text-brand-orange">• Preparing</span>
+  );
+}
+
+function OrderDrawer({ order, onClose, onCancel }) {
+  const navigate = useNavigate();
+  const total = orderTotal(order);
+  const batches = order.batches ?? toBatches(order.items);
+  const [open, setOpen] = useState(false);
+  const [showReason, setShowReason] = useState(false);
+  const [reason, setReason] = useState("");
+  const cancelTime = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setOpen(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className={cn(
+          "fixed inset-0 z-40 bg-black/10 transition-opacity duration-300",
+          open ? "opacity-100" : "opacity-0",
+        )}
+        onClick={onClose}
+      />
+
+      {/* Drawer panel */}
+      <div
+        className={cn(
+          "fixed right-0 top-0 z-50 flex h-full w-[360px] flex-col bg-white shadow-2xl transition-transform duration-300 ease-in-out",
+          open ? "translate-x-0" : "translate-x-full",
+        )}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between border-b border-brand-cream/60 px-5 py-4">
+          <div>
+            <p className="font-bold">Order #{order.id.slice(-8).toUpperCase()}</p>
+            <p className="text-xs text-muted-foreground">
+              Table {order.tableNumber} &bull; {order.orderType ?? "Dine-In"}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1 text-muted-foreground hover:bg-brand-cream/30 hover:text-[#24190f]"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Batches + items */}
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {batches.map((batch, batchIdx) => (
+            <div key={batchIdx} className={batchIdx > 0 ? "mt-5" : ""}>
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Batch {batchIdx + 1}
+                </span>
+                <BatchStatusLabel
+                  index={batchIdx}
+                  total={batches.length}
+                  orderStatus={order.orderStatus}
+                />
+              </div>
+              <div className="space-y-2">
+                {batch.map((item, i) => (
+                  <div key={i} className="flex items-center justify-between text-sm">
+                    <span>
+                      <span className="font-medium">{item.quantity}x</span>{" "}
+                      {item.title}
+                    </span>
+                    <span className="font-medium">₹{item.price * item.quantity}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Cancellation reason box */}
+        <div
+          className={cn(
+            "overflow-hidden transition-all duration-300 ease-in-out",
+            showReason ? "max-h-64 opacity-100" : "max-h-0 opacity-0",
+          )}
+        >
+          <div className="mx-5 mb-3 rounded-xl border border-brand-cream bg-[#FAFAF8] p-4">
+            <p className="mb-3 text-[13px] font-bold tracking-tight text-[#24190f]">Reason for Cancellation</p>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Write a reason for cancellation… (optional)"
+              rows={4}
+              className="w-full resize-none rounded-lg border border-brand-cream/60 bg-white px-3 py-2 text-sm leading-relaxed text-[#5a403e] placeholder:text-muted-foreground/50 focus:border-brand-cream focus:outline-none"
+            />
+            <p className="mt-2 text-[11px] text-muted-foreground/70">{cancelTime}</p>
+          </div>
+        </div>
+
+        {/* Cancel button */}
+        <div className="px-5 pb-3">
+          <button
+            type="button"
+            onClick={() => {
+              if (!showReason) {
+                setShowReason(true);
+              } else {
+                onCancel(reason);
+              }
+            }}
+            className={cn(
+              "w-full rounded-lg border py-2 text-sm font-medium transition-colors",
+              showReason
+                ? "border-brand-maroon/40 bg-brand-maroon/5 text-brand-maroon hover:bg-brand-maroon/10"
+                : "border-brand-cream text-[#5a403e] hover:border-brand-maroon/30 hover:text-brand-maroon",
+            )}
+          >
+            {showReason ? "Confirm Cancellation" : "Cancel order"}
+          </button>
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-brand-cream/60 px-5 py-4">
+          <div className="mb-4 flex items-center justify-between">
+            <span className="font-medium">Total</span>
+            <span className="text-lg font-bold">{formatPrice(total)}</span>
+          </div>
+          <Button
+            onClick={() => navigate(`/bill?orderId=${order.id}`)}
+            className="w-full bg-brand-gradient text-white hover:brightness-105"
+          >
+            Generate Bill
+          </Button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function ManageOrders() {
   const [orders, setOrders] = useState(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("all");
+  const [selectedOrder, setSelectedOrder] = useState(null);
 
   function load() {
     requestJson("/restaurant_owner/orders")
@@ -84,20 +238,18 @@ export default function ManageOrders() {
 
   useEffect(load, []);
 
-  async function advance(order) {
-    const step = NEXT_STEP[order.orderStatus];
-    if (!step) return;
+  async function cancelOrder(order, reason = "") {
     setOrders((current) =>
-      current.map((o) => (o.id === order.id ? { ...o, orderStatus: step.to } : o)),
+      current.map((o) => (o.id === order.id ? { ...o, orderStatus: "cancelled" } : o)),
     );
+    setSelectedOrder(null);
     try {
       await requestJson(`/restaurant_owner/orders/${order.id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderStatus: step.to }),
+        body: JSON.stringify({ orderStatus: "cancelled", cancellationReason: reason }),
       });
-    } catch (err) {
-      setError(err.message);
+    } catch {
       load();
     }
   }
@@ -110,12 +262,15 @@ export default function ManageOrders() {
       preparing: list.filter((o) => o.orderStatus === "preparing").length,
       ready: list.filter((o) => o.orderStatus === "ready").length,
       completed: list.filter((o) => o.orderStatus === "completed").length,
+      billGenerated: list.filter((o) => o.paymentStatus === "paid").length,
     };
   }, [orders]);
 
   const visible = useMemo(() => {
     const list = orders ?? [];
-    return filter === "all" ? list : list.filter((o) => o.orderStatus === filter);
+    if (filter === "all") return list;
+    if (filter === "bill_generated") return list.filter((o) => o.paymentStatus === "paid");
+    return list.filter((o) => o.orderStatus === filter);
   }, [orders, filter]);
 
   if (error && !orders) {
@@ -147,28 +302,29 @@ export default function ManageOrders() {
         </Button>
       </div>
 
-      <section className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+      <section className="grid grid-cols-2 gap-4 lg:grid-cols-6">
         <StatPill label="Total Orders" value={counts.total} />
         <StatPill label="New" value={counts.new} tone="text-[#5F5F5F]" />
         <StatPill label="Preparing" value={counts.preparing} tone="text-brand-orange" />
         <StatPill label="Ready" value={counts.ready} tone="text-[#1565C0]" />
         <StatPill label="Completed" value={counts.completed} tone="text-brand-green" />
+        <StatPill label="Bill Generated" value={counts.billGenerated} tone="text-brand-maroon" />
       </section>
 
       <div className="flex flex-wrap gap-2">
         {FILTERS.map((f) => (
           <button
-            key={f}
+            key={f.value}
             type="button"
-            onClick={() => setFilter(f)}
+            onClick={() => setFilter(f.value)}
             className={cn(
-              "rounded-full px-4 py-1.5 text-sm font-medium capitalize transition",
-              filter === f
+              "rounded-full px-4 py-1.5 text-sm font-medium transition",
+              filter === f.value
                 ? "bg-brand-gradient text-white"
                 : "border border-brand-cream bg-white text-[#5a403e] hover:bg-brand-cream/30",
             )}
           >
-            {f}
+            {f.label}
           </button>
         ))}
       </div>
@@ -189,45 +345,38 @@ export default function ManageOrders() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {visible.map((order) => {
-                const step = NEXT_STEP[order.orderStatus];
-                return (
-                  <TableRow key={order.id}>
-                    <TableCell className="pl-6 font-semibold">
-                      #{order.id.slice(-6)}
-                    </TableCell>
-                    <TableCell>{order.tableNumber}</TableCell>
-                    <TableCell className="max-w-[260px] text-muted-foreground">
-                      {order.items.map((i) => `${i.quantity}× ${i.title}`).join(", ")}
-                    </TableCell>
-                    <TableCell className="font-semibold">{formatPrice(orderTotal(order))}</TableCell>
-                    <TableCell className="text-muted-foreground">{formatTime(order.time)}</TableCell>
-                    <TableCell>
-                      <Badge variant={statusVariant(order.orderStatus)} className="capitalize">
-                        {order.orderStatus}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={order.paymentStatus === "paid" ? "ok" : "muted"} className="capitalize">
-                        {order.paymentStatus}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="pr-6 text-right">
-                      {step ? (
-                        <Button
-                          size="sm"
-                          onClick={() => advance(order)}
-                          className="bg-brand-orange text-white hover:bg-brand-orange/90"
-                        >
-                          {step.label}
-                        </Button>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+              {visible.map((order) => (
+                <TableRow key={order.id}>
+                  <TableCell className="pl-6 font-semibold">
+                    #{order.id.slice(-6)}
+                  </TableCell>
+                  <TableCell>{order.tableNumber}</TableCell>
+                  <TableCell className="max-w-[260px] text-muted-foreground">
+                    {order.items.map((i) => `${i.quantity}× ${i.title}`).join(", ")}
+                  </TableCell>
+                  <TableCell className="font-semibold">{formatPrice(orderTotal(order))}</TableCell>
+                  <TableCell className="text-muted-foreground">{formatTime(order.time)}</TableCell>
+                  <TableCell>
+                    <Badge variant={statusVariant(order.orderStatus)} className="capitalize">
+                      {order.orderStatus}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={order.paymentStatus === "paid" ? "ok" : "muted"} className="capitalize">
+                      {order.paymentStatus}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="pr-6 text-right">
+                    <Button
+                      size="sm"
+                      onClick={() => setSelectedOrder(order)}
+                      className="rounded-full border-0 bg-[#FDEEE8] text-brand-maroon hover:bg-brand-maroon/15 hover:text-brand-maroon focus-visible:ring-0"
+                    >
+                      View Details
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
               {visible.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
@@ -239,6 +388,14 @@ export default function ManageOrders() {
           </Table>
         </CardContent>
       </Card>
+
+      {selectedOrder && (
+        <OrderDrawer
+          order={selectedOrder}
+          onClose={() => setSelectedOrder(null)}
+          onCancel={(reason) => cancelOrder(selectedOrder, reason)}
+        />
+      )}
     </DashboardLayout>
   );
 }

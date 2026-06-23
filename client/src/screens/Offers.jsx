@@ -3,7 +3,7 @@
 // of active/scheduled/expired offers (PRD §17).
 
 import { useEffect, useMemo, useState } from "react";
-import { Copy, ImagePlus, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Copy, ImagePlus, Pencil, Trash2 } from "lucide-react";
 
 import { requestJson } from "@/api";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -34,7 +34,7 @@ const DISCOUNT_TYPES = [
   { value: "percent", label: "Percentage" },
   { value: "flat", label: "Flat Amount" },
   { value: "free_item", label: "Free Item" },
-  { value: "tableware", label: "Tableware offer" },
+  { value: "tableware", label: "Tablewise offer" },
 ];
 
 const APPLICABLE = [
@@ -52,8 +52,11 @@ const EMPTY = {
   description: "",
   discountType: "percent",
   discountValue: "",
+  discountName: "",
   item: "",
   minOrder: "",
+  itemApplicability: "entire_menu",
+  tableNumbers: "",
   applicableFor: "dine-in",
   validFrom: "",
   validTo: "",
@@ -111,6 +114,8 @@ export default function Offers() {
   const [form, setForm] = useState(EMPTY);
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
+  const [editingOffer, setEditingOffer] = useState(null);
+  const [editForm, setEditForm] = useState(null);
 
   function load() {
     requestJson("/restaurant_owner/offers")
@@ -162,6 +167,41 @@ export default function Offers() {
     }
   }
 
+  function startEdit(offer) {
+    setEditForm({ ...EMPTY, ...offer });
+    setEditingOffer(offer);
+  }
+
+  function cancelEdit() {
+    setEditingOffer(null);
+    setEditForm(null);
+  }
+
+  async function saveEdit() {
+    setSaving(true);
+    setError("");
+    try {
+      await requestJson(`/restaurant_owner/offers/${editingOffer.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editForm),
+      });
+      setOffers((current) =>
+        current.map((o) => (o.id === editingOffer.id ? { ...o, ...editForm } : o)),
+      );
+      cancelEdit();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteOffer(id) {
+    await remove(id);
+    cancelEdit();
+  }
+
   const visible = useMemo(
     () => offers.filter((o) => o.name.toLowerCase().includes(search.toLowerCase())),
     [offers, search],
@@ -175,7 +215,123 @@ export default function Offers() {
     );
   }
 
-  const showItemPicker = form.discountType === "free_item" || form.discountType === "tableware";
+  /* ── Edit view ── */
+  if (editingOffer && editForm) {
+    const setEF = (patch) => setEditForm((f) => ({ ...f, ...patch }));
+    return (
+      <DashboardLayout>
+        <button
+          type="button"
+          onClick={cancelEdit}
+          className="flex items-center gap-1.5 text-sm font-medium text-brand-orange hover:underline"
+        >
+          <ArrowLeft className="h-4 w-4" /> Back to Program Overview
+        </button>
+
+        <div>
+          <h1 className="text-2xl font-bold">Edit coupons and offers</h1>
+          <p className="text-sm text-muted-foreground">
+            Configure rewards and visit requirements for this specific milestone.
+          </p>
+        </div>
+
+        {error ? <p className="text-sm text-brand-maroon">{error}</p> : null}
+
+        <Card>
+          <CardContent className="grid grid-cols-1 gap-5 p-6 sm:grid-cols-2">
+            {/* Offer Name — full width */}
+            <div className="col-span-full space-y-1.5">
+              <label className="text-sm font-medium text-[#24190f]">Offer Name</label>
+              <Input
+                value={editForm.name}
+                onChange={(e) => setEF({ name: e.target.value })}
+                placeholder="Welcome Drink"
+              />
+            </div>
+
+            {/* Reward Type */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-[#24190f]">Reward Type</label>
+              <Select value={editForm.discountType} onValueChange={(v) => setEF({ discountType: v })}>
+                <SelectTrigger className="focus:ring-0 focus:ring-offset-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DISCOUNT_TYPES.map((d) => (
+                    <SelectItem key={d.value} value={d.value}>{d.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Minimum Order Value */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-[#24190f]">Minimum Order Value</label>
+              <RupeeInput
+                value={editForm.minOrder}
+                onChange={(e) => setEF({ minOrder: e.target.value })}
+                placeholder="300"
+              />
+            </div>
+
+            {/* Start Date */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-[#24190f]">Start Date</label>
+              <Input
+                type="date"
+                value={editForm.validFrom}
+                onChange={(e) => setEF({ validFrom: e.target.value })}
+              />
+            </div>
+
+            {/* End Date */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-[#24190f]">End Date</label>
+              <Input
+                type="date"
+                value={editForm.validTo}
+                onChange={(e) => setEF({ validTo: e.target.value })}
+              />
+            </div>
+
+            {/* Description — full width */}
+            <div className="col-span-full space-y-1.5">
+              <label className="text-sm font-medium text-[#24190f]">Description</label>
+              <Textarea
+                value={editForm.description}
+                onChange={(e) => setEF({ description: e.target.value })}
+                rows={4}
+                placeholder="Describe the offer for your customers…"
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Footer actions */}
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => deleteOffer(editingOffer.id)}
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-brand-maroon"
+          >
+            <Trash2 className="h-4 w-4" /> Delete
+          </button>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={cancelEdit} className="focus-visible:ring-0">
+              Cancel
+            </Button>
+            <Button
+              onClick={saveEdit}
+              disabled={saving}
+              className="bg-brand-gradient px-6 text-white hover:brightness-105"
+            >
+              {saving ? "Saving…" : "Save Changes"}
+            </Button>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -281,53 +437,140 @@ export default function Offers() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                {showItemPicker ? (
+              {/* Percentage */}
+              {form.discountType === "percent" && (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5">
-                    <Label>Select Item</Label>
-                    <Select value={form.item} onValueChange={(v) => set({ item: v })}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Choose an item" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {items.map((it) => (
-                          <SelectItem key={it} value={it}>
-                            {it}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ) : (
-                  <div className="space-y-1.5">
-                    <Label>{form.discountType === "percent" ? "Discount (%)" : "Discount (₹)"}</Label>
+                    <Label>Discount (%)</Label>
                     <Input
                       type="number"
                       min="0"
+                      max="100"
                       value={form.discountValue}
                       onChange={(e) => set({ discountValue: e.target.value })}
-                      placeholder={form.discountType === "percent" ? "20" : "100"}
+                      placeholder="20"
                     />
                   </div>
-                )}
-                <div className="space-y-1.5">
-                  <Label>Minimum Order Value</Label>
-                  <RupeeInput
-                    value={form.minOrder}
-                    onChange={(e) => set({ minOrder: e.target.value })}
-                    placeholder="300"
-                  />
+                  <div className="space-y-1.5">
+                    <Label>Minimum Order Value</Label>
+                    <RupeeInput
+                      value={form.minOrder}
+                      onChange={(e) => set({ minOrder: e.target.value })}
+                      placeholder="300"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label>Start Date</Label>
-                  <Input type="date" value={form.validFrom} onChange={(e) => set({ validFrom: e.target.value })} />
+              {/* Flat Amount */}
+              {form.discountType === "flat" && (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Offer Name</Label>
+                    <Input
+                      value={form.discountName}
+                      onChange={(e) => set({ discountName: e.target.value })}
+                      placeholder="₹ 100 OFF Weekend Deal"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Discount amount</Label>
+                    <RupeeInput
+                      value={form.discountValue}
+                      onChange={(e) => set({ discountValue: e.target.value })}
+                      placeholder="100"
+                    />
+                  </div>
+                  <div className="col-span-full space-y-1.5">
+                    <Label>Item Applicability</Label>
+                    <Select
+                      value={form.itemApplicability}
+                      onValueChange={(v) => set({ itemApplicability: v })}
+                    >
+                      <SelectTrigger className="focus:ring-0 focus:ring-offset-0">
+                        <SelectValue placeholder="Select applicability" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="entire_menu">Entire Menu</SelectItem>
+                        <SelectItem value="categories">Categories</SelectItem>
+                        <SelectItem value="specific_items">Specific Items</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>End Date</Label>
-                  <Input type="date" value={form.validTo} onChange={(e) => set({ validTo: e.target.value })} />
+              )}
+
+              {/* Free Item */}
+              {form.discountType === "free_item" && (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Select Item</Label>
+                    <Input
+                      value={form.item}
+                      onChange={(e) => set({ item: e.target.value })}
+                      placeholder="Gourmet Sundae"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Minimum Order Value</Label>
+                    <RupeeInput
+                      value={form.minOrder}
+                      onChange={(e) => set({ minOrder: e.target.value })}
+                      placeholder="30"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Tablewise offer */}
+              {form.discountType === "tableware" && (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Offer Name</Label>
+                    <Input
+                      value={form.discountName}
+                      onChange={(e) => set({ discountName: e.target.value })}
+                      placeholder="₹ 100 OFF Weekend Deal"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Discount amount</Label>
+                    <RupeeInput
+                      value={form.discountValue}
+                      onChange={(e) => set({ discountValue: e.target.value })}
+                      placeholder="100"
+                    />
+                  </div>
+                  <div className="col-span-full space-y-1.5">
+                    <Label>Table Number(s)</Label>
+                    <Input
+                      value={form.tableNumbers}
+                      onChange={(e) => set({ tableNumbers: e.target.value })}
+                      placeholder="EX: 4, 5, 6, 7"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <Label>Validity</Label>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Start Date</Label>
+                    <Input
+                      type="date"
+                      value={form.validFrom}
+                      onChange={(e) => set({ validFrom: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">End Date</Label>
+                    <Input
+                      type="date"
+                      value={form.validTo}
+                      onChange={(e) => set({ validTo: e.target.value })}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -343,10 +586,19 @@ export default function Offers() {
               </div>
 
               <div className="flex justify-end gap-2 pt-1">
-                <Button variant="outline" onClick={() => setForm(EMPTY)}>
+                <Button
+                  variant="outline"
+                  onClick={() => setForm(EMPTY)}
+                  className="border-transparent bg-transparent text-[#5A403E] hover:bg-transparent hover:text-[#5A403E] focus-visible:ring-0"
+                >
                   Cancel
                 </Button>
-                <Button variant="outline">Save Draft</Button>
+                <Button
+                  variant="outline"
+                  className="border-[#EFE7DD] bg-white text-[#24190F] hover:bg-white hover:text-[#24190F] focus-visible:ring-0"
+                >
+                  Save Draft
+                </Button>
                 <Button
                   onClick={publish}
                   disabled={saving}
@@ -441,7 +693,7 @@ export default function Offers() {
                   </TableCell>
                   <TableCell className="pr-6">
                     <div className="flex items-center justify-end gap-3">
-                      <button type="button" className="text-muted-foreground hover:text-brand-orange" aria-label="Edit">
+                      <button type="button" onClick={() => startEdit(offer)} className="text-muted-foreground hover:text-brand-orange" aria-label="Edit">
                         <Pencil className="h-4 w-4" />
                       </button>
                       <button

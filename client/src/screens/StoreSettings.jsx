@@ -3,7 +3,7 @@
 // details with a sticky unsaved-changes action bar (PRD §13.1 OWN-01).
 
 import { useEffect, useState } from "react";
-import { ImagePlus, ImageUp } from "lucide-react";
+import { ChevronDown, ImagePlus, ImageUp, Plus } from "lucide-react";
 
 import { requestJson } from "@/api";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -13,6 +13,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+
+const LEGAL_ENTITY_TYPES = [
+  "Sole proprietorship",
+  "Partnership",
+  "Private Limited",
+  "Public Limited",
+  "NGO",
+  "AOP/BOI",
+];
 
 const CUISINES = [
   "Contemporary French",
@@ -28,6 +37,46 @@ function Field({ label, children }) {
     <div className="space-y-1.5">
       <Label className="text-xs uppercase tracking-wide text-brand-red">{label}</Label>
       {children}
+    </div>
+  );
+}
+
+function LegalEntitySelect({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const display = value || "Select type";
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+      >
+        <span className="font-medium uppercase tracking-wide">{display}</span>
+        <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-brand-cream/70 bg-white shadow-lg">
+          {LEGAL_ENTITY_TYPES.map((type) => (
+            <button
+              key={type}
+              type="button"
+              onClick={() => { onChange(type); setOpen(false); }}
+              className={cn(
+                "flex w-full items-center px-4 py-2.5 text-sm hover:bg-brand-cream/30",
+                value === type && "font-semibold text-brand-orange",
+              )}
+            >
+              {type}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="flex w-full items-center gap-1.5 border-t border-brand-cream/60 px-4 py-2.5 text-sm text-muted-foreground hover:bg-brand-cream/20"
+          >
+            <Plus className="h-3.5 w-3.5" /> Add Legal entity type
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -258,22 +307,25 @@ export default function StoreSettings() {
             </CardHeader>
             <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Legal Entity Type">
-                <Input
-                  value={settings.business.legalEntityType}
-                  onChange={(e) => setNested("business", { legalEntityType: e.target.value })}
+                <LegalEntitySelect
+                  value={settings.business?.legalEntityType ?? ""}
+                  onChange={(v) => setNested("business", { legalEntityType: v })}
                 />
               </Field>
-              <Field label="Registration No.">
+              <Field label="Owner Name">
                 <Input
-                  value={settings.business.registrationNo}
-                  onChange={(e) => setNested("business", { registrationNo: e.target.value })}
+                  value={settings.business?.ownerName ?? ""}
+                  onChange={(e) => setNested("business", { ownerName: e.target.value })}
+                  placeholder="Full name"
                 />
               </Field>
               <div className="sm:col-span-2">
-                <Field label="GST Number (PAN)">
+                <Field label="Tax Identifier (PAN)">
                   <Input
-                    value={settings.business.gstNumber}
-                    onChange={(e) => setNested("business", { gstNumber: e.target.value })}
+                    value={settings.business?.panNumber ?? ""}
+                    onChange={(e) => setNested("business", { panNumber: e.target.value })}
+                    placeholder="ABCDE1234F"
+                    className="uppercase tracking-widest"
                   />
                 </Field>
               </div>
@@ -285,17 +337,42 @@ export default function StoreSettings() {
               <h2 className="text-base font-bold">Licenses &amp; Tax</h2>
             </CardHeader>
             <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Health Permit ID">
+              <div className="sm:col-span-2">
+                <Field label="GST Number">
+                  <Input
+                    value={settings.business?.gstNumber ?? ""}
+                    onChange={(e) => setNested("business", { gstNumber: e.target.value })}
+                    placeholder="27AACR1234F1Z1"
+                    className="uppercase tracking-widest"
+                  />
+                </Field>
+              </div>
+              <Field label="FSSAI">
                 <Input
-                  value={settings.licenses.healthPermitId}
-                  onChange={(e) => setNested("licenses", { healthPermitId: e.target.value })}
+                  value={settings.licenses?.fssai ?? ""}
+                  onChange={(e) => setNested("licenses", { fssai: e.target.value })}
+                  placeholder="H-992-B"
                 />
               </Field>
-              <Field label="License Expiry">
+              <Field label="FSSAI License Expiry">
                 <Input
                   type="date"
-                  value={settings.licenses.licenseExpiry}
-                  onChange={(e) => setNested("licenses", { licenseExpiry: e.target.value })}
+                  value={settings.licenses?.fssaiExpiry ?? ""}
+                  onChange={(e) => setNested("licenses", { fssaiExpiry: e.target.value })}
+                />
+              </Field>
+              <Field label="Trade License">
+                <Input
+                  value={settings.licenses?.tradeLicense ?? ""}
+                  onChange={(e) => setNested("licenses", { tradeLicense: e.target.value })}
+                  placeholder="REG-9912002"
+                />
+              </Field>
+              <Field label="Trade License Expiry">
+                <Input
+                  type="date"
+                  value={settings.licenses?.tradeLicenseExpiry ?? ""}
+                  onChange={(e) => setNested("licenses", { tradeLicenseExpiry: e.target.value })}
                 />
               </Field>
             </CardContent>

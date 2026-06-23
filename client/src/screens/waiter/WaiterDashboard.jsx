@@ -1,243 +1,349 @@
-// Waiter Dashboard (/waiter) — Figma node 17:362. Table selection (manual/scan),
-// a running order summary built on the Menu screen, and an active-tables billing
-// list (PRD §11 WAIT-02/04/06). Placing the order writes to the shared store and
-// flows into the kitchen + owner views.
-
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CheckCircle2, Eye, QrCode, Send } from "lucide-react";
+import { CheckCheck, CheckCircle2, QrCode, UtensilsCrossed, XCircle } from "lucide-react";
 
 import { requestJson } from "@/api";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
-import WaiterLayout, { formatPrice } from "./WaiterLayout";
+import WaiterLayout from "./WaiterLayout";
 import { useWaiter } from "./WaiterApp";
 
-function statusTone(status) {
-  if (status === "Ready to serve") return "bg-[#FFF3E0] text-[#D9480F]";
-  if (status === "Preparing") return "bg-[#FFF3E0] text-[#D9480F]";
-  if (status === "Paid & Clearing" || status === "Served") return "bg-[#E8F5EC] text-brand-green";
-  return "bg-[#F3F4F6] text-[#5F5F5F]";
+const FILTERS = ["All Orders", "Preparing", "Ready To Serve", "Served", "Bill Requested", "Completed"];
+
+/* ── Derive batches from flat items array ── */
+function toBatches(items, size = 3) {
+  const out = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
 }
 
+function batchStatus(batchIndex, batchCount, orderStatus) {
+  const s = (orderStatus ?? "").toLowerCase();
+  if (s === "cancelled") return "CANCELLED";
+  if (s === "ready" || s === "served" || s === "completed") return "PREPARED";
+  if (s === "preparing") return batchIndex < batchCount - 1 ? "PREPARED" : "PREPARING";
+  return "PREPARING";
+}
+
+function BatchIcon({ status }) {
+  if (status === "PREPARED")
+    return <CheckCircle2 className="h-4 w-4 text-emerald-500" />;
+  if (status === "CANCELLED")
+    return <XCircle className="h-4 w-4 text-brand-maroon" />;
+  return (
+    <span className="flex h-4 w-4 items-center justify-center rounded-full border-2 border-brand-orange bg-white">
+      <span className="h-1.5 w-1.5 rounded-full bg-brand-orange" />
+    </span>
+  );
+}
+
+function BatchStatusBadge({ status }) {
+  if (status === "PREPARED")
+    return <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[10px] font-bold text-emerald-600">PREPARED</span>;
+  if (status === "CANCELLED")
+    return <span className="rounded-full bg-red-50 px-2.5 py-0.5 text-[10px] font-bold text-brand-maroon">CANCELLED</span>;
+  return <span className="rounded-full bg-brand-orange/10 px-2.5 py-0.5 text-[10px] font-bold text-brand-orange">PREPARING</span>;
+}
+
+function orderStatusLabel(orderStatus, paymentStatus) {
+  if (paymentStatus === "paid") return { label: "Completed", color: "text-muted-foreground" };
+  const s = (orderStatus ?? "").toLowerCase();
+  if (s === "ready") return { label: "Ready To Serve", color: "text-emerald-600" };
+  if (s === "served") return { label: "Served", color: "text-emerald-600" };
+  if (s === "cancelled") return { label: "Cancelled", color: "text-brand-maroon" };
+  return { label: "Preparing", color: "text-brand-orange" };
+}
+
+function statusDot(color) {
+  const map = {
+    "text-emerald-600": "bg-emerald-500",
+    "text-brand-orange": "bg-brand-orange",
+    "text-brand-maroon": "bg-brand-maroon",
+    "text-muted-foreground": "bg-gray-400",
+  };
+  return map[color] ?? "bg-gray-400";
+}
+
+function matchesFilter(order, filter) {
+  if (filter === "All Orders") return true;
+  const s = (order.orderStatus ?? "").toLowerCase();
+  const p = (order.paymentStatus ?? "").toLowerCase();
+  if (filter === "Preparing") return s === "new" || s === "preparing";
+  if (filter === "Ready To Serve") return s === "ready";
+  if (filter === "Served") return s === "served";
+  if (filter === "Bill Requested") return p === "requested";
+  if (filter === "Completed") return p === "paid" || s === "completed";
+  return true;
+}
+
+/* ── Single order card ── */
+function OrderCard({ order, onAction }) {
+  const navigate = useNavigate();
+  const { setActiveTable, clearCart, addToCart, setQuantity } = useWaiter();
+  const batches = toBatches(order.items);
+
+  function handleModify() {
+    clearCart();
+    setActiveTable(`T-${order.tableNumber}`);
+    for (const item of order.items) {
+      addToCart({ id: item.id, name: item.title, price: item.price ?? 0, foodType: "veg" });
+      if (item.quantity > 1) setQuantity(item.id, item.quantity);
+    }
+    navigate("/waiter/menu");
+  }
+
+  function handleAddItems() {
+    setActiveTable(`T-${order.tableNumber}`);
+    navigate("/waiter/menu");
+  }
+  const { label, color } = orderStatusLabel(order.orderStatus, order.paymentStatus);
+  const total = order.items.reduce((sum, i) => sum + (i.price ?? 0) * i.quantity, 0);
+  const billRequested = (order.paymentStatus ?? "") === "requested";
+  const paid = (order.paymentStatus ?? "") === "paid";
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-brand-cream/60 bg-white shadow-sm">
+      {/* Card header */}
+      <div className="flex items-center justify-between border-b border-brand-cream/40 px-5 py-4">
+        <div className="flex items-center gap-2.5">
+          <span className="rounded-lg bg-[#FFF0E6] px-3 py-1.5 text-sm font-bold text-brand-orange">
+            T-{order.tableNumber}
+          </span>
+          <span className="rounded-full bg-brand-orange/10 px-2.5 py-0.5 text-[10px] font-bold uppercase text-brand-orange">
+            Dine-In
+          </span>
+          <span className={cn("flex items-center gap-1.5 text-sm font-semibold", color)}>
+            <span className={cn("h-2 w-2 rounded-full", statusDot(color))} />
+            {label}
+          </span>
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+            {batches.length} Batches Total
+          </p>
+          <p className="text-base font-bold text-[#24190f]">
+            ₹{total.toLocaleString("en-IN")}
+          </p>
+        </div>
+      </div>
+
+      {/* Batches */}
+      <div className="divide-y divide-brand-cream/40 px-5">
+        {batches.map((batch, bIdx) => {
+          const bStatus = batchStatus(bIdx, batches.length, order.orderStatus);
+          const cancelled = bStatus === "CANCELLED";
+          return (
+            <div key={bIdx} className="py-4">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <BatchIcon status={bStatus} />
+                  <span className={cn("text-sm font-bold uppercase tracking-wide", cancelled ? "text-muted-foreground" : "")}>
+                    Batch {String(bIdx + 1).padStart(2, "0")}
+                  </span>
+                </div>
+                <BatchStatusBadge status={bStatus} />
+              </div>
+              <div className="space-y-2">
+                {batch.map((item, iIdx) => (
+                  <div
+                    key={iIdx}
+                    className={cn(
+                      "flex items-center justify-between text-sm",
+                      cancelled && "opacity-50",
+                    )}
+                  >
+                    <span className="text-[#24190f]">
+                      {item.quantity}x {item.title}
+                    </span>
+                    {item.price != null && (
+                      <span className="font-medium text-[#24190f]">
+                        ₹{(item.price * item.quantity).toLocaleString("en-IN")}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Actions */}
+      <div className="grid grid-cols-4 gap-px border-t border-brand-cream/50 bg-brand-cream/30">
+        <button
+          type="button"
+          onClick={handleAddItems}
+          className="bg-white px-3 py-3.5 text-sm font-semibold text-[#24190f] transition hover:bg-brand-cream/20 first:rounded-bl-2xl"
+        >
+          Add Items
+        </button>
+        <button
+          type="button"
+          onClick={handleModify}
+          className="bg-white px-3 py-3.5 text-sm font-semibold text-[#24190f] transition hover:bg-brand-cream/20"
+        >
+          Modify Order
+        </button>
+        <button
+          type="button"
+          onClick={() => onAction(order.id, "served")}
+          className="flex items-center justify-center gap-1.5 bg-white px-3 py-3.5 text-sm font-semibold text-[#24190f] transition hover:bg-brand-cream/20"
+        >
+          <CheckCheck className="h-4 w-4" /> Mark As Served
+        </button>
+        {paid ? (
+          <button
+            type="button"
+            disabled
+            className="rounded-br-2xl bg-white px-3 py-3.5 text-sm font-semibold text-muted-foreground"
+          >
+            Paid
+          </button>
+        ) : billRequested ? (
+          <button
+            type="button"
+            onClick={() => navigate("/waiter/orders")}
+            className="rounded-br-2xl border border-brand-maroon bg-white px-3 py-3.5 text-sm font-bold text-brand-maroon transition hover:bg-brand-maroon/5"
+          >
+            View Bill
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onAction(order.id, "requested", true)}
+            className="rounded-br-2xl bg-white px-3 py-3.5 text-sm font-semibold text-[#24190f] transition hover:bg-brand-cream/20"
+          >
+            Request Bill
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Main ── */
 export default function WaiterDashboard() {
   const navigate = useNavigate();
-  const { activeTable, setActiveTable, cart, subtotal, setQuantity, clearCart } = useWaiter();
-  const [tableInput, setTableInput] = useState("");
-  const [tables, setTables] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [activeTable, setActiveTable] = useState("T-12");
+  const [filter, setFilter] = useState("All Orders");
   const [error, setError] = useState("");
-  const [placing, setPlacing] = useState(false);
-  const [status, setStatus] = useState("");
 
-  function loadTables() {
-    requestJson("/waiter/tables")
-      .then((payload) => setTables(payload.data.tables))
+  function load() {
+    requestJson("/restaurant_owner/orders")
+      .then((payload) => {
+        const active = (payload.data?.orders ?? []).filter(
+          (o) => o.tableNumber && o.paymentStatus !== "paid",
+        );
+        setOrders(active);
+      })
       .catch((err) => setError(err.message));
   }
 
-  useEffect(loadTables, []);
+  useEffect(() => { load(); }, []);
 
-  const taxes = Math.round(subtotal * 0.08);
-  const total = subtotal + taxes;
-
-  function applyTable(event) {
-    event.preventDefault();
-    if (!tableInput.trim()) return;
-    setActiveTable(tableInput.trim().toUpperCase());
-    setTableInput("");
-  }
-
-  async function placeOrder() {
-    if (placing || cart.length === 0) return;
-    setPlacing(true);
-    setStatus("");
+  async function handleAction(orderId, status, isPayment = false) {
     try {
-      await requestJson("/waiter/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tableNumber: activeTable.replace(/^T-?/i, ""),
-          items: cart.map((line) => ({ id: line.id, quantity: line.quantity })),
-        }),
-      });
-      clearCart();
-      loadTables();
-      setStatus(`Order placed for ${activeTable}`);
+      if (isPayment) {
+        await requestJson(`/waiter/orders/${orderId}/payment`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paymentStatus: status }),
+        });
+      } else {
+        await requestJson(`/chef/orders/${orderId}/status`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderStatus: status }),
+        });
+      }
+      load();
     } catch (err) {
       setError(err.message);
-    } finally {
-      setPlacing(false);
     }
   }
 
+  const filtered = orders.filter((o) => matchesFilter(o, filter));
+
   return (
     <WaiterLayout>
-      <div>
-        <h1 className="text-3xl font-bold">Waiter Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Place orders on behalf of customers and generate bills.
-        </p>
-      </div>
-
-      {/* Table selection */}
-      <div className="mt-6 rounded-2xl border border-brand-cream/60 bg-white p-5">
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[320px_1fr]">
-          <div className="grid h-44 place-items-center rounded-xl border-2 border-dashed border-brand-orange/40 bg-[#F4F2F0]">
-            <div className="flex flex-col items-center gap-2 text-muted-foreground">
-              <QrCode className="h-9 w-9" />
-              <span className="text-sm">Position QR Code within frame</span>
-            </div>
-          </div>
-
+      {/* Topbar */}
+      <header className="sticky top-0 z-30 border-b border-brand-cream/60 bg-[#FAFAF8] px-6 py-3">
+        <div className="flex items-center justify-between">
           <div>
-            <form className="flex flex-col gap-2 sm:flex-row sm:items-end" onSubmit={applyTable}>
-              <div className="flex-1">
-                <label className="mb-1.5 block text-sm font-medium">Manual Table Entry</label>
-                <input
-                  value={tableInput}
-                  onChange={(e) => setTableInput(e.target.value)}
-                  placeholder="e.g. T-12"
-                  className="w-full rounded-xl border border-brand-cream/80 bg-white px-4 py-2.5 text-sm outline-none focus:border-brand-orange"
-                />
-              </div>
-              <button
-                type="submit"
-                className="rounded-xl bg-brand-orange px-5 py-2.5 text-sm font-bold text-white hover:bg-brand-orange/90"
-              >
-                Scan QR
-              </button>
-            </form>
-
-            <div className="mt-3 flex items-center justify-between rounded-xl border border-brand-green/40 bg-[#EAF7EE] px-4 py-3">
-              <span className="flex items-center gap-2 text-sm font-semibold text-brand-green">
-                <CheckCircle2 className="h-4 w-4" />
-                Table {activeTable} | Active Session
-              </span>
-              <button
-                type="button"
-                onClick={() => navigate("/waiter/menu")}
-                className="text-sm font-semibold text-brand-green underline"
-              >
-                Change
-              </button>
+            <p className="text-lg font-bold text-brand-red">Saffron Kitchen</p>
+            <p className="text-xs text-muted-foreground">Waiter Dashboard</p>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <Avatar className="h-8 w-8">
+              <AvatarFallback className="bg-brand-gradient text-xs font-bold text-white">AM</AvatarFallback>
+            </Avatar>
+            <div className="flex flex-col leading-tight">
+              <span className="text-sm font-semibold">Alen Mercy</span>
+              <span className="text-[10px] text-muted-foreground">Waiter</span>
             </div>
           </div>
         </div>
+      </header>
+
+      {/* Table context bar */}
+      <div className="flex items-center justify-between border-b border-brand-cream/50 bg-[#FAFAF8] px-6 py-2.5">
+        <span className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+          <UtensilsCrossed className="h-4 w-4" />
+          Table {activeTable}
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="flex items-center gap-1.5 rounded-xl bg-brand-gradient px-3.5 py-2 text-sm font-bold text-white hover:brightness-105"
+          >
+            <QrCode className="h-4 w-4" /> Scan QR
+          </button>
+          <button
+            type="button"
+            className="rounded-xl border border-brand-cream/80 bg-white px-3.5 py-2 text-sm font-semibold text-[#24190f] hover:bg-brand-cream/20"
+          >
+            Select Table
+          </button>
+        </div>
       </div>
 
-      {/* Live order summary */}
-      <div className="mt-6 overflow-hidden rounded-2xl border border-brand-cream/60 bg-white">
-        <div className="flex items-center justify-between border-b border-brand-cream/60 px-5 py-4">
-          <h2 className="text-xl font-bold">Live Order Summary</h2>
-          <span className="rounded-lg bg-[#FCE9E4] px-3 py-1 text-sm font-bold text-brand-red">
-            {activeTable}
-          </span>
+      <div className="mx-auto max-w-[860px] px-5 py-5">
+        {/* Filter tabs */}
+        <div className="mb-5 flex flex-wrap gap-2">
+          {FILTERS.map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setFilter(f)}
+              className={cn(
+                "rounded-full border px-4 py-1.5 text-sm font-semibold transition",
+                filter === f
+                  ? "border-brand-maroon bg-white text-brand-maroon"
+                  : "border-brand-cream/70 bg-white text-[#5a403e] hover:border-brand-maroon/40 hover:text-brand-maroon",
+              )}
+            >
+              {f}
+            </button>
+          ))}
         </div>
 
-        {cart.length === 0 ? (
-          <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-            No items yet. Add dishes from the{" "}
-            <button type="button" onClick={() => navigate("/waiter/menu")} className="font-semibold text-brand-orange">
-              Menu
-            </button>{" "}
-            to build this order.
+        {error && (
+          <p className="mb-4 rounded-xl bg-red-50 px-4 py-2.5 text-sm text-brand-maroon">{error}</p>
+        )}
+
+        {/* Order cards */}
+        {filtered.length === 0 ? (
+          <div className="rounded-2xl border border-brand-cream/60 bg-white py-14 text-center text-sm text-muted-foreground">
+            No orders for this filter.
           </div>
         ) : (
-          <>
-            <div className="divide-y divide-brand-cream/60">
-              {cart.map((line) => (
-                <div key={line.id} className="flex items-center justify-between px-5 py-3.5">
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2 rounded-full border border-brand-cream px-2 py-1">
-                      <button type="button" onClick={() => setQuantity(line.id, line.quantity - 1)} className="text-brand-orange">−</button>
-                      <span className="w-5 text-center text-sm font-bold">{line.quantity}</span>
-                      <button type="button" onClick={() => setQuantity(line.id, line.quantity + 1)} className="text-brand-orange">+</button>
-                    </div>
-                    <div>
-                      <p className="font-semibold">{line.name}</p>
-                      <button type="button" className="text-xs text-muted-foreground">+ Add note</button>
-                    </div>
-                  </div>
-                  <span className="font-semibold">{formatPrice(line.price * line.quantity)}</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="space-y-1.5 bg-[#FCFAF7] px-5 py-4 text-sm">
-              <div className="flex justify-between text-muted-foreground">
-                <span>Subtotal</span>
-                <span className="text-foreground">{formatPrice(subtotal)}</span>
-              </div>
-              <div className="flex justify-between text-muted-foreground">
-                <span>Taxes (8%)</span>
-                <span className="text-foreground">{formatPrice(taxes)}</span>
-              </div>
-              <div className="flex justify-between border-t border-brand-cream/60 pt-2 text-base font-bold">
-                <span>Total</span>
-                <span className="text-brand-red">{formatPrice(total)}</span>
-              </div>
-            </div>
-
-            <div className="p-4">
-              <button
-                type="button"
-                onClick={placeOrder}
-                disabled={placing}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-gradient py-3.5 text-base font-bold text-white transition hover:brightness-105 disabled:opacity-60"
-              >
-                <Send className="h-4 w-4" /> {placing ? "Placing…" : "Place Order"}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-
-      {status ? <p className="mt-3 text-sm text-brand-green">{status}</p> : null}
-      {error ? <p className="mt-3 text-sm text-brand-maroon">{error}</p> : null}
-
-      {/* Active tables & billing */}
-      <h2 className="mb-3 mt-9 text-xl font-bold">Active Tables &amp; Billing</h2>
-      <div className="overflow-hidden rounded-2xl border border-brand-cream/60 bg-white">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-brand-cream/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
-              <th className="px-5 py-3 font-semibold">Table</th>
-              <th className="px-5 py-3 font-semibold">Status</th>
-              <th className="px-5 py-3 font-semibold">Items</th>
-              <th className="px-5 py-3 font-semibold">Total Amount</th>
-              <th className="px-5 py-3 text-right font-semibold">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-brand-cream/60">
-            {tables.map((row) => (
-              <tr key={row.table}>
-                <td className="px-5 py-4 font-bold">{row.table === "—" ? "—" : `T-${row.table}`}</td>
-                <td className="px-5 py-4">
-                  <span className={cn("rounded-full px-3 py-1 text-xs font-bold", statusTone(row.status))}>
-                    {row.status}
-                  </span>
-                </td>
-                <td className="max-w-[260px] truncate px-5 py-4 text-muted-foreground">{row.items}</td>
-                <td className="px-5 py-4 font-bold">{formatPrice(row.total)}</td>
-                <td className="px-5 py-4 text-right">
-                  <button
-                    type="button"
-                    onClick={() => navigate("/waiter/orders")}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-brand-orange px-3 py-1.5 text-xs font-bold text-white hover:bg-brand-orange/90"
-                  >
-                    <Eye className="h-3.5 w-3.5" /> View Bill
-                  </button>
-                </td>
-              </tr>
+          <div className="space-y-4">
+            {filtered.map((order) => (
+              <OrderCard key={order.id} order={order} onAction={handleAction} />
             ))}
-            {tables.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-5 py-10 text-center text-muted-foreground">
-                  No active tables.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+          </div>
+        )}
       </div>
     </WaiterLayout>
   );

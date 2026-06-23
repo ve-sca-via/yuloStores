@@ -1,19 +1,8 @@
-// Light-sidebar shell for the Waiter portal — Figma node 17:513. Distinct from
-// the owner's dark sidebar: white surface, Home/Orders/Menu/Settings, and a
-// "Quick Order" CTA that jumps to the menu.
-
 import { useLocation, useNavigate } from "react-router-dom";
 import { BellRing, Home, ReceiptText, Settings, UtensilsCrossed } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-
-const NAV = [
-  { to: "/waiter", label: "Home", icon: Home, exact: true },
-  { to: "/waiter/orders", label: "Orders", icon: ReceiptText },
-  { to: "/waiter/requests", label: "Requests", icon: BellRing },
-  { to: "/waiter/menu", label: "Menu", icon: UtensilsCrossed },
-  { to: "/waiter/settings", label: "Settings", icon: Settings },
-];
+import { useWaiter } from "./WaiterApp";
 
 export function formatPrice(value) {
   return new Intl.NumberFormat("en-IN", {
@@ -23,58 +12,77 @@ export function formatPrice(value) {
   }).format(value);
 }
 
-export default function WaiterLayout({ children }) {
+const NAV = [
+  { to: "/waiter",          label: "Home",     icon: Home,          exact: true },
+  { to: "/waiter/menu",     label: "Menu",      icon: UtensilsCrossed },
+  { to: "/waiter/orders",   label: "Orders",    icon: ReceiptText },
+  { to: "/waiter/requests", label: "Requests",  icon: BellRing },
+  { to: "/waiter/settings", label: "Settings",  icon: Settings },
+];
+
+function BottomNav() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const { cartCount } = useWaiter();
 
-  const isActive = (item) => (item.exact ? pathname === item.to : pathname.startsWith(item.to));
+  function isActive(item) {
+    return item.exact ? pathname === item.to : pathname.startsWith(item.to);
+  }
 
   return (
-    <div className="flex min-h-screen bg-[#FAFAF8] font-sans text-[#24190f]">
-      <aside className="sticky top-0 flex h-screen w-[260px] shrink-0 flex-col border-r border-brand-cream/60 bg-white px-4 py-6">
-        <div className="flex items-center gap-3 px-2">
-          <span className="grid h-11 w-11 place-items-center rounded-full bg-brand-gradient text-sm font-bold text-white">
-            BE
-          </span>
-          <div>
-            <p className="font-bold leading-tight">Bistro Elite</p>
-            <p className="text-xs text-muted-foreground">Terminal 4</p>
-          </div>
-        </div>
+    <nav className="fixed bottom-0 left-0 right-0 z-50 flex border-t border-brand-cream/60 bg-white">
+      {NAV.map((item) => {
+        const Icon = item.icon;
+        const active = isActive(item);
+        const isMenu = item.to === "/waiter/menu";
+        return (
+          <button
+            key={item.to}
+            type="button"
+            onClick={() => navigate(item.to)}
+            className={cn(
+              "relative flex flex-1 flex-col items-center justify-center gap-0.5 py-3 text-[11px] font-semibold transition-colors",
+              active ? "text-brand-orange" : "text-muted-foreground hover:text-[#24190f]",
+            )}
+          >
+            <span className="relative">
+              <Icon
+                className={cn("h-5 w-5", active && "stroke-brand-orange")}
+                strokeWidth={active ? 2.2 : 1.8}
+              />
+              {isMenu && cartCount > 0 && (
+                <span className="absolute -right-2 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-brand-orange text-[9px] font-bold text-white">
+                  {cartCount > 9 ? "9+" : cartCount}
+                </span>
+              )}
+            </span>
+            <span>{item.label}</span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
 
-        <nav className="mt-8 flex flex-1 flex-col gap-1.5">
-          {NAV.map((item) => {
-            const Icon = item.icon;
-            const active = isActive(item);
-            return (
-              <button
-                key={item.to}
-                type="button"
-                onClick={() => navigate(item.to)}
-                className={cn(
-                  "flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition-colors",
-                  active
-                    ? "bg-brand-gradient text-white"
-                    : "text-[#5a403e] hover:bg-brand-cream/30",
-                )}
-              >
-                <Icon className="h-[18px] w-[18px]" strokeWidth={1.9} />
-                {item.label}
-              </button>
-            );
-          })}
-        </nav>
+/* Shared page topbar — used by screens that don't have their own header */
+export function WaiterPageHeader({ title, subtitle, right }) {
+  return (
+    <header className="sticky top-0 z-30 flex items-center justify-between border-b border-brand-cream/60 bg-[#FAFAF8] px-6 py-3.5">
+      <div>
+        <p className="text-lg font-bold text-[#24190f]">{title}</p>
+        {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+      </div>
+      {right && <div>{right}</div>}
+    </header>
+  );
+}
 
-        <button
-          type="button"
-          onClick={() => navigate("/waiter/menu")}
-          className="rounded-full bg-brand-gradient py-3 text-sm font-bold text-white transition hover:brightness-105"
-        >
-          Quick Order
-        </button>
-      </aside>
-
-      <main className="min-w-0 flex-1 px-8 py-7">{children}</main>
+/* Main layout wrapper — no sidebar, just background + bottom nav padding */
+export default function WaiterLayout({ children }) {
+  return (
+    <div className="min-h-screen bg-brand-page font-sans text-[#24190f]">
+      <div className="pb-20">{children}</div>
+      <BottomNav />
     </div>
   );
 }

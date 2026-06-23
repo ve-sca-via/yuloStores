@@ -130,7 +130,7 @@ function OrdersTable({ orders, onView }) {
             </TableCell>
             <TableCell className="text-muted-foreground">{formatTime(order.time)}</TableCell>
             <TableCell className="pr-6 text-right">
-              <button type="button" onClick={() => onView(order)} className="text-[13px] font-semibold text-brand-orange">
+              <button type="button" onClick={() => onView(order)} className="rounded-full border-0 bg-[#FDEEE8] px-3.5 py-1.5 text-sm font-medium text-brand-maroon hover:bg-brand-maroon/15">
                 View Details
               </button>
             </TableCell>
