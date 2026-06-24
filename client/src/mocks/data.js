@@ -257,6 +257,8 @@ const SEED = {
   // Drives the Bill Details screen (/bill) — Figma node 173:1047. Table-wise
   // bill with batched orders, tax/charge summary, and a GST invoice preview.
   billDetails: {
+    orderId: "ord_100001",
+    paymentStatus: "pending",
     table: "T-10",
     status: "Ready To Bill",
     startedAt: "7:12 PM",

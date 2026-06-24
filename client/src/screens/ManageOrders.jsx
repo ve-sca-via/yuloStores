@@ -86,14 +86,23 @@ function BatchStatusLabel({ index, total, orderStatus }) {
   );
 }
 
-function OrderDrawer({ order, onClose, onCancel }) {
+function OrderDrawer({ order, onClose, onCancel, onMarkPaid }) {
   const navigate = useNavigate();
   const total = orderTotal(order);
   const batches = order.batches ?? toBatches(order.items);
   const [open, setOpen] = useState(false);
   const [showReason, setShowReason] = useState(false);
   const [reason, setReason] = useState("");
+  const [marking, setMarking] = useState(false);
+  const isPaid = order.paymentStatus === "paid";
   const cancelTime = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+
+  async function handleMarkPaid() {
+    if (isPaid || marking) return;
+    setMarking(true);
+    await onMarkPaid(order.id);
+    setMarking(false);
+  }
 
   useEffect(() => {
     const id = requestAnimationFrame(() => setOpen(true));
@@ -212,12 +221,22 @@ function OrderDrawer({ order, onClose, onCancel }) {
             <span className="font-medium">Total</span>
             <span className="text-lg font-bold">{formatPrice(total)}</span>
           </div>
-          <Button
-            onClick={() => navigate(`/bill?orderId=${order.id}`)}
-            className="w-full bg-brand-gradient text-white hover:brightness-105"
-          >
-            Generate Bill
-          </Button>
+          <div className="flex flex-col gap-2">
+            <Button
+              onClick={handleMarkPaid}
+              disabled={isPaid || marking}
+              className="w-full bg-brand-gradient text-white hover:brightness-105 disabled:opacity-70"
+            >
+              {isPaid ? "✓ Paid" : marking ? "Processing…" : "Mark as Paid"}
+            </Button>
+            <button
+              type="button"
+              onClick={() => navigate(`/bill?orderId=${order.id}`)}
+              className="w-full rounded-lg border border-brand-cream py-2 text-sm font-medium text-[#5a403e] hover:bg-brand-cream/20"
+            >
+              View Bill
+            </button>
+          </div>
         </div>
       </div>
     </>
@@ -237,6 +256,22 @@ export default function ManageOrders() {
   }
 
   useEffect(load, []);
+
+  async function markPaid(orderId) {
+    setOrders((current) =>
+      current.map((o) => o.id === orderId ? { ...o, paymentStatus: "paid" } : o),
+    );
+    setSelectedOrder((o) => o?.id === orderId ? { ...o, paymentStatus: "paid" } : o);
+    try {
+      await requestJson(`/restaurant_owner/orders/${orderId}/payment`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentStatus: "paid" }),
+      });
+    } catch {
+      load();
+    }
+  }
 
   async function cancelOrder(order, reason = "") {
     setOrders((current) =>
@@ -394,6 +429,7 @@ export default function ManageOrders() {
           order={selectedOrder}
           onClose={() => setSelectedOrder(null)}
           onCancel={(reason) => cancelOrder(selectedOrder, reason)}
+          onMarkPaid={markPaid}
         />
       )}
     </DashboardLayout>

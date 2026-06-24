@@ -183,6 +183,7 @@ export default function OwnerDashboard() {
   const [error, setError] = useState("");
   const [salesPeriod, setSalesPeriod] = useState("Today");
   const [breakdownPeriod, setBreakdownPeriod] = useState("Today");
+  const [hoveredSegment, setHoveredSegment] = useState(null);
 
   useEffect(() => {
     requestJson("/restaurant_owner/dashboard")
@@ -298,19 +299,33 @@ export default function OwnerDashboard() {
                       startAngle={90}
                       endAngle={-270}
                       stroke="none"
+                      onMouseEnter={(_, index) => setHoveredSegment(BREAKDOWN_SEGMENTS[breakdownPeriod][index])}
+                      onMouseLeave={() => setHoveredSegment(null)}
                     >
                       {BREAKDOWN_SEGMENTS[breakdownPeriod].map((s) => (
                         <Cell key={s.label} fill={s.color} />
                       ))}
                     </Pie>
-                    <Tooltip formatter={(v, n) => [`${v}`, n]} />
                   </PieChart>
                 </ResponsiveContainer>
-                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                  <strong className="text-2xl font-bold">
-                    {BREAKDOWN_SEGMENTS[breakdownPeriod].reduce((s, i) => s + i.value, 0)}
-                  </strong>
-                  <span className="text-[11px] text-muted-foreground">Total Orders</span>
+                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center transition-all">
+                  {hoveredSegment ? (
+                    <>
+                      <strong className="text-2xl font-bold" style={{ color: hoveredSegment.color }}>
+                        {hoveredSegment.value}
+                      </strong>
+                      <span className="max-w-[80px] text-center text-[10px] leading-tight text-muted-foreground">
+                        {hoveredSegment.label}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <strong className="text-2xl font-bold">
+                        {BREAKDOWN_SEGMENTS[breakdownPeriod].reduce((s, i) => s + i.value, 0)}
+                      </strong>
+                      <span className="text-[11px] text-muted-foreground">Total Orders</span>
+                    </>
+                  )}
                 </div>
               </div>
 

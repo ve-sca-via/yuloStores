@@ -425,7 +425,46 @@ const routes = [
     handler: ({ params, body }) => {
       const order = db.orders.find((o) => o.id === params[0]);
       if (!order) fail("Order not found");
+      const wasUnpaid = order.paymentStatus !== "paid";
       order.paymentStatus = body.paymentStatus ?? "paid";
+
+      // Reflect payment in dashboard stats
+      if (wasUnpaid && order.paymentStatus === "paid") {
+        const amount = orderTotal(order);
+        const d = db.dashboard;
+
+        // Revenue
+        const prevRev = parseInt((d.stats.revenue.value ?? "0").replace(/[^\d]/g, "")) || 0;
+        d.stats.revenue.value = "₹" + (prevRev + amount).toLocaleString("en-IN");
+
+        // Total orders
+        d.stats.totalOrders.value = String((parseInt(d.stats.totalOrders.value) || 0) + 1);
+
+        // Order breakdown: +1 Delivered, -1 Preparing
+        const delivered = d.orderBreakdown.segments.find((s) => s.label === "Delivered");
+        const preparing = d.orderBreakdown.segments.find((s) => s.label === "Preparing");
+        if (delivered) delivered.value += 1;
+        if (preparing && preparing.value > 0) preparing.value -= 1;
+        d.orderBreakdown.total = String((parseInt(d.orderBreakdown.total) || 0) + 1);
+
+        // Kitchen pills: +1 Completed, -1 Pending
+        const completedPill = d.kitchen.pills.find((p) => p.label === "Completed");
+        const pendingPill = d.kitchen.pills.find((p) => p.label === "Pending");
+        if (completedPill) completedPill.value = String((parseInt(completedPill.value) || 0) + 1);
+        if (pendingPill && parseInt(pendingPill.value) > 0)
+          pendingPill.value = String(parseInt(pendingPill.value) - 1);
+
+        // Add to kitchen queue
+        d.kitchen.queue.unshift({
+          table: order.tableNumber ? `T-${order.tableNumber}` : "Online",
+          items: order.items.map((i) => i.title).join(", "),
+          status: "PAID",
+          time: "just now",
+          action: "View Bill",
+        });
+        if (d.kitchen.queue.length > 5) d.kitchen.queue.pop();
+      }
+
       return ok("Payment status updated", { order });
     },
   },

@@ -4,7 +4,9 @@
 // Data from the mock layer: GET /restaurant_owner/bill.
 
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
+  ArrowLeft,
   Check,
   ChevronUp,
   Clock,
@@ -57,15 +59,38 @@ function BatchCard({ batch }) {
 }
 
 export default function BillDetails() {
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [invoiceOpen, setInvoiceOpen] = useState(true);
+  const [paid, setPaid] = useState(false);
+  const [marking, setMarking] = useState(false);
 
   useEffect(() => {
     requestJson("/restaurant_owner/bill")
-      .then((payload) => setData(payload.data))
+      .then((payload) => {
+        setData(payload.data);
+        setPaid(payload.data.paymentStatus === "paid");
+      })
       .catch((err) => setError(err.message));
   }, []);
+
+  async function handleMarkPaid() {
+    if (!data?.orderId || paid || marking) return;
+    setMarking(true);
+    try {
+      await requestJson(`/restaurant_owner/orders/${data.orderId}/payment`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentStatus: "paid" }),
+      });
+      setPaid(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setMarking(false);
+    }
+  }
 
   if (error) {
     return (
@@ -86,7 +111,15 @@ export default function BillDetails() {
 
   return (
     <DashboardLayout>
-      {/* Page header + actions */}
+      {/* Back + Page header + actions */}
+      <button
+        type="button"
+        onClick={() => navigate("/orders")}
+        className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-[#24190f]"
+      >
+        <ArrowLeft className="h-4 w-4" /> Back to Manage Orders
+      </button>
+
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Bill Details</h1>
@@ -104,8 +137,13 @@ export default function BillDetails() {
           <Button variant="outline" className="gap-2">
             <Share2 className="h-4 w-4" /> Share
           </Button>
-          <Button className="gap-2 bg-brand-red text-white hover:bg-brand-red/90">
-            <Check className="h-4 w-4" /> Mark As Paid
+          <Button
+            onClick={handleMarkPaid}
+            disabled={paid || marking}
+            className="gap-2 bg-brand-red text-white hover:bg-brand-red/90 disabled:opacity-70"
+          >
+            <Check className="h-4 w-4" />
+            {paid ? "Paid ✓" : marking ? "Processing…" : "Mark As Paid"}
           </Button>
         </div>
       </div>
