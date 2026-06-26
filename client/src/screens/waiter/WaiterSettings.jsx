@@ -1,10 +1,17 @@
 import { useNavigate } from "react-router-dom";
 import { LogOut, UserRound } from "lucide-react";
 
+import { useStaffAuth } from "@/context/StaffAuthContext";
 import WaiterLayout, { WaiterPageHeader } from "./WaiterLayout";
 
 export default function WaiterSettings() {
   const navigate = useNavigate();
+  const { staff, logout } = useStaffAuth();
+
+  async function handleLogout() {
+    await logout();
+    navigate("/staff/login", { replace: true });
+  }
 
   return (
     <WaiterLayout>
@@ -17,14 +24,16 @@ export default function WaiterSettings() {
               <UserRound className="h-7 w-7" />
             </span>
             <div>
-              <p className="text-lg font-bold">Sunil Verma</p>
-              <p className="text-sm text-muted-foreground">Waiter · ID waiter01 · Terminal 4</p>
+              <p className="text-lg font-bold">{staff?.name ?? "Waiter"}</p>
+              <p className="text-sm text-muted-foreground">
+                Waiter · Code {staff?.staffCode ?? "—"}
+              </p>
             </div>
           </div>
 
           <button
             type="button"
-            onClick={() => navigate("/")}
+            onClick={handleLogout}
             className="flex w-full items-center justify-center gap-2 rounded-xl border border-brand-cream bg-white py-3.5 text-sm font-bold text-brand-maroon hover:bg-brand-cream/20"
           >
             <LogOut className="h-4 w-4" /> Log out

@@ -6,6 +6,8 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
+import { useCustomerAuth } from "@/context/CustomerAuthContext";
+
 import QrLanding from "./QrLanding";
 import CustomerLogin from "./CustomerLogin";
 import OtpVerify from "./OtpVerify";
@@ -100,12 +102,15 @@ export default function CustomerApp() {
   const cartCount = cart.reduce((sum, line) => sum + line.quantity, 0);
   const cartTotal = cart.reduce((sum, line) => sum + line.price * line.quantity, 0);
 
+  const auth = useCustomerAuth();
+
   const value = {
     session,
     setSession,
     cart,
     cartCount,
     cartTotal,
+    auth,
     ...api,
   };
 
@@ -129,12 +134,11 @@ export default function CustomerApp() {
   );
 }
 
-// Sends unverified customers to the login screen, remembering where they wanted
-// to go (PRD §7 — QR context retained through OTP verification).
+// Redirect unauthenticated customers to login, preserving intended destination.
 function Guard({ children }) {
-  const { session } = useCustomer();
+  const { auth, session } = useCustomer();
   const location = useLocation();
-  if (!session.verified) {
+  if (!auth.isAuthenticated && !session.verified) {
     return <Navigate to="/order/login" replace state={{ from: location.pathname }} />;
   }
   return children;

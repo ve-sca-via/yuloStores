@@ -1,41 +1,48 @@
-import { useEffect, useState } from "react";
-
-import { requestJson } from "@/api";
+import { useStaffAuth } from "@/context/StaffAuthContext";
+import { useWaiterSessions } from "@/hooks/staff/useWaiter";
+import { staffApi } from "@/api/staff.api";
+import { useQueryClient } from "@tanstack/react-query";
+import { waiterKeys } from "@/hooks/staff/useWaiter";
 import { cn } from "@/lib/utils";
 import WaiterLayout, { WaiterPageHeader, formatPrice } from "./WaiterLayout";
 
 function statusTone(status) {
-  if (status === "Ready to serve" || status === "Preparing") return "bg-[#FFF3E0] text-[#D9480F]";
-  if (status === "Paid & Clearing" || status === "Served") return "bg-[#E8F5EC] text-brand-green";
+  const s = (status ?? "").toLowerCase();
+  if (s === "ready" || s === "preparing") return "bg-[#FFF3E0] text-[#D9480F]";
+  if (s === "served" || s === "completed") return "bg-[#E8F5EC] text-brand-green";
   return "bg-[#F3F4F6] text-[#5F5F5F]";
 }
 
 export default function WaiterOrders() {
-  const [tables, setTables] = useState(null);
-  const [error, setError] = useState("");
-  const [statusMsg, setStatusMsg] = useState("");
-
-  function load() {
-    requestJson("/waiter/tables")
-      .then((payload) => setTables(payload.data.tables))
-      .catch((err) => setError(err.message));
-  }
-
-  useEffect(load, []);
+  const { staff } = useStaffAuth();
+  const qc = useQueryClient();
+  const restaurantId = staff?.restaurantId;
+  const { data: sessions = [], isLoading, isError } = useWaiterSessions(restaurantId);
 
   async function markServed(orderId) {
     try {
-      await requestJson(`/restaurant_owner/orders/${orderId}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderStatus: "served" }),
-      });
-      setStatusMsg("Order marked served");
-      load();
-    } catch (err) {
-      setError(err.message);
-    }
+      await staffApi.updateOrderStatus(restaurantId, orderId, "served");
+      qc.invalidateQueries({ queryKey: waiterKeys.sessions(restaurantId) });
+    } catch { /* handled silently */ }
   }
+
+  // Flatten sessions into a table-grouped view
+  const tables = sessions.map((s) => {
+    const itemSummary = (s.orders ?? [])
+      .flatMap((o) => o.items ?? [])
+      .slice(0, 3)
+      .map((i) => `${i.quantity ?? 1}x ${i.name ?? i.menuItem?.name ?? "Item"}`)
+      .join(", ");
+    const total = (s.orders ?? []).reduce((sum, o) => sum + (o.totalAmount ?? 0), 0);
+    return {
+      _id:     s._id,
+      table:   s.table?.number ?? s.tableNumber ?? "—",
+      status:  s.status ?? s.orders?.[0]?.orderStatus ?? "new",
+      items:   itemSummary,
+      total,
+      orderId: s.orders?.[0]?._id,
+    };
+  });
 
   return (
     <WaiterLayout>
@@ -45,11 +52,10 @@ export default function WaiterOrders() {
       />
 
       <div className="px-5 py-5">
-        {statusMsg && <p className="mb-4 text-sm text-brand-green">{statusMsg}</p>}
-        {error && <p className="mb-4 text-sm text-brand-maroon">{error}</p>}
+        {isError && <p className="mb-4 text-sm text-brand-maroon">Failed to load orders.</p>}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {!tables ? (
+          {isLoading ? (
             <p className="col-span-2 text-sm text-muted-foreground">Loading orders…</p>
           ) : tables.length === 0 ? (
             <div className="col-span-2 rounded-2xl border border-brand-cream/60 bg-white py-14 text-center text-sm text-muted-foreground">
@@ -57,7 +63,7 @@ export default function WaiterOrders() {
             </div>
           ) : (
             tables.map((row) => (
-              <div key={row.table} className="rounded-2xl border border-brand-cream/60 bg-white p-5 shadow-sm">
+              <div key={row._id} className="rounded-2xl border border-brand-cream/60 bg-white p-5 shadow-sm">
                 <div className="flex items-center justify-between">
                   <span className="text-lg font-bold">
                     {row.table === "—" ? "Counter" : `Table T-${row.table}`}
@@ -71,8 +77,9 @@ export default function WaiterOrders() {
                   <span className="font-bold text-brand-red">{formatPrice(row.total)}</span>
                   <button
                     type="button"
-                    onClick={() => markServed(row.orderId)}
-                    className="rounded-full bg-brand-orange px-4 py-2 text-xs font-bold text-white hover:bg-brand-orange/90"
+                    onClick={() => row.orderId && markServed(row.orderId)}
+                    disabled={!row.orderId}
+                    className="rounded-full bg-brand-orange px-4 py-2 text-xs font-bold text-white hover:bg-brand-orange/90 disabled:opacity-50"
                   >
                     Mark Served
                   </button>

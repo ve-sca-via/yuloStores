@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CheckCheck, CheckCircle2, QrCode, UtensilsCrossed, X, XCircle } from "lucide-react";
 import jsQR from "jsqr";
 
-import { requestJson } from "@/api";
+import { useStaffAuth } from "@/context/StaffAuthContext";
+import { useWaiterSessions, useMarkPaid, useScanTable } from "@/hooks/staff/useWaiter";
+import { staffApi } from "@/api/staff.api";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import WaiterLayout from "./WaiterLayout";
@@ -368,49 +370,51 @@ function OrderCard({ order, onAction }) {
 /* ── Main ── */
 export default function WaiterDashboard() {
   const navigate = useNavigate();
-  const [orders, setOrders] = useState([]);
-  const [activeTable, setActiveTable] = useState("T-12");
+  const { staff } = useStaffAuth();
+  const restaurantId = staff?.restaurantId;
+
+  const [activeTable, setActiveTable] = useState(null);
   const [filter, setFilter] = useState("All Orders");
-  const [error, setError] = useState("");
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [actionError, setActionError] = useState("");
+
+  // TanStack Query — sessions auto-poll every 15s
+  const { data: sessions = [], isLoading, error: sessionsErr } = useWaiterSessions(restaurantId);
+  const { mutate: markPaid } = useMarkPaid(restaurantId);
+
+  const error = actionError || sessionsErr?.message || "";
+
+  // Flatten sessions to order-like objects the existing UI expects
+  const orders = sessions.flatMap((session) =>
+    (session.orders ?? [session]).map((o) => ({
+      ...o,
+      tableNumber: session.tableNumber ?? o.tableNumber,
+      sessionId:   session._id ?? session.id,
+    })),
+  );
 
   function handleQRScan(value) {
-    // Accept plain table numbers like "T-5", "5", or "Table 5"
     const match = String(value).match(/\d+/);
     if (match) setActiveTable(`T-${match[0]}`);
   }
 
-  function load() {
-    requestJson("/restaurant_owner/orders")
-      .then((payload) => {
-        const active = (payload.data?.orders ?? []).filter(
-          (o) => o.tableNumber && o.paymentStatus !== "paid",
-        );
-        setOrders(active);
-      })
-      .catch((err) => setError(err.message));
-  }
-
-  useEffect(() => { load(); }, []);
-
   async function handleAction(orderId, status, isPayment = false) {
+    setActionError("");
     try {
       if (isPayment) {
-        await requestJson(`/waiter/orders/${orderId}/payment`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ paymentStatus: status }),
-        });
+        // Find the session for this order to get sessionId
+        const session = sessions.find(
+          (s) => (s.orders ?? [s]).some((o) => (o._id ?? o.id) === orderId),
+        );
+        if (session) {
+          markPaid({ sessionId: session._id ?? session.id, paymentMethod: "cash" });
+        }
       } else {
-        await requestJson(`/chef/orders/${orderId}/status`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ orderStatus: status }),
-        });
+        // Direct status update via staff.api (chef-side endpoint available to waiter view too)
+        await staffApi.updateOrderStatus(restaurantId, orderId, status);
       }
-      load();
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     }
   }
 
@@ -427,10 +431,12 @@ export default function WaiterDashboard() {
           </div>
           <div className="flex items-center gap-2.5">
             <Avatar className="h-8 w-8">
-              <AvatarFallback className="bg-brand-gradient text-xs font-bold text-white">AM</AvatarFallback>
+              <AvatarFallback className="bg-brand-gradient text-xs font-bold text-white">
+                {(staff?.name ?? "W").slice(0, 2).toUpperCase()}
+              </AvatarFallback>
             </Avatar>
             <div className="flex flex-col leading-tight">
-              <span className="text-sm font-semibold">Alen Mercy</span>
+              <span className="text-sm font-semibold">{staff?.name ?? "Waiter"}</span>
               <span className="text-[10px] text-muted-foreground">Waiter</span>
             </div>
           </div>
@@ -485,14 +491,18 @@ export default function WaiterDashboard() {
         )}
 
         {/* Order cards */}
-        {filtered.length === 0 ? (
+        {isLoading ? (
+          <div className="rounded-2xl border border-brand-cream/60 bg-white py-14 text-center text-sm text-muted-foreground animate-pulse">
+            Loading orders…
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="rounded-2xl border border-brand-cream/60 bg-white py-14 text-center text-sm text-muted-foreground">
             No orders for this filter.
           </div>
         ) : (
           <div className="space-y-4">
             {filtered.map((order) => (
-              <OrderCard key={order.id} order={order} onAction={handleAction} />
+              <OrderCard key={order._id ?? order.id} order={order} onAction={handleAction} />
             ))}
           </div>
         )}

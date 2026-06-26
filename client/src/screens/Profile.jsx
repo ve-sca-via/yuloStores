@@ -1,9 +1,8 @@
-// Profile (/profile) — owner account details, password change, and notification
-// preferences. Data from the mock layer: GET/PATCH /restaurant_owner/profile.
+import { useState } from "react";
+import { useMutation } from "@tanstack/react-query";
 
-import { useEffect, useState } from "react";
-
-import { requestJson } from "@/api";
+import { useOwnerAuth } from "@/context/OwnerAuthContext";
+import { ownerApi } from "@/api/owner.api";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -13,86 +12,53 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 
 const NOTIFICATION_OPTIONS = [
-  { key: "newOrders", label: "New orders", note: "Alert me when a new order is placed." },
-  { key: "cancellations", label: "Cancellations", note: "Alert me on cancellation requests." },
-  { key: "lowStock", label: "Low stock", note: "Alert me when inventory runs low." },
-  { key: "dailyReport", label: "Daily report", note: "Email me a daily summary." },
+  { key: "newOrders",     label: "New orders",     note: "Alert me when a new order is placed." },
+  { key: "cancellations", label: "Cancellations",  note: "Alert me on cancellation requests." },
+  { key: "lowStock",      label: "Low stock",       note: "Alert me when inventory runs low." },
+  { key: "dailyReport",   label: "Daily report",    note: "Email me a daily summary." },
 ];
 
-function initials(name) {
-  return name
-    .split(" ")
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 2);
+function initials(name = "") {
+  return name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 }
 
 export default function Profile() {
-  const [profile, setProfile] = useState(null);
-  const [error, setError] = useState("");
-  const [status, setStatus] = useState("");
+  const { user } = useOwnerAuth();
+
+  const [form, setForm] = useState({
+    name:          user?.name  ?? "",
+    email:         user?.email ?? "",
+    phone:         user?.phone ?? "",
+    notifications: user?.notifications ?? {
+      newOrders: true, cancellations: true, lowStock: false, dailyReport: true,
+    },
+  });
   const [password, setPassword] = useState({ next: "", confirm: "" });
-  const [saving, setSaving] = useState(false);
+  const [statusMsg, setStatusMsg] = useState("");
 
-  useEffect(() => {
-    requestJson("/restaurant_owner/profile")
-      .then((payload) => setProfile(payload.data))
-      .catch((err) => setError(err.message));
-  }, []);
+  const updateMutation = useMutation({
+    mutationFn: (body) => ownerApi.updateProfile(body),
+    onSuccess: () => {
+      setStatusMsg("Profile saved");
+      setPassword({ next: "", confirm: "" });
+    },
+    onError: (err) => setStatusMsg(err.response?.data?.message ?? "Save failed"),
+  });
 
-  function update(patch) {
-    setProfile((current) => ({ ...current, ...patch }));
-  }
-
-  function updateNotification(key, value) {
-    setProfile((current) => ({
-      ...current,
-      notifications: { ...current.notifications, [key]: value },
-    }));
-  }
-
-  async function handleSave(event) {
-    event.preventDefault();
-    setStatus("");
+  function handleSave(e) {
+    e.preventDefault();
+    setStatusMsg("");
     if (password.next && password.next !== password.confirm) {
-      setStatus("Passwords do not match");
+      setStatusMsg("Passwords do not match");
       return;
     }
-    setSaving(true);
-    try {
-      await requestJson("/restaurant_owner/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: profile.name,
-          email: profile.email,
-          phone: profile.phone,
-          notifications: profile.notifications,
-          ...(password.next ? { password: password.next } : {}),
-        }),
-      });
-      setPassword({ next: "", confirm: "" });
-      setStatus("Profile saved");
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (error && !profile) {
-    return (
-      <DashboardLayout>
-        <p className="text-muted-foreground">Failed to load: {error}</p>
-      </DashboardLayout>
-    );
-  }
-  if (!profile) {
-    return (
-      <DashboardLayout>
-        <p className="text-muted-foreground">Loading profile…</p>
-      </DashboardLayout>
-    );
+    updateMutation.mutate({
+      name:          form.name,
+      email:         form.email,
+      phone:         form.phone,
+      notifications: form.notifications,
+      ...(password.next ? { password: password.next } : {}),
+    });
   }
 
   return (
@@ -106,41 +72,39 @@ export default function Profile() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {status ? (
-              <span
-                className={
-                  status.includes("not match") ? "text-sm text-brand-maroon" : "text-sm text-brand-green"
-                }
+            {statusMsg && (
+              <span className={statusMsg.includes("not match") || statusMsg.includes("failed")
+                ? "text-sm text-brand-maroon"
+                : "text-sm text-brand-green"}
               >
-                {status}
+                {statusMsg}
               </span>
-            ) : null}
+            )}
             <Button
               type="submit"
-              disabled={saving}
+              disabled={updateMutation.isPending}
               className="bg-brand-gradient text-white hover:brightness-105"
             >
-              {saving ? "Saving…" : "Save Changes"}
+              {updateMutation.isPending ? "Saving…" : "Save Changes"}
             </Button>
           </div>
         </div>
 
-        {/* Identity */}
+        {/* Identity card */}
         <Card>
           <CardContent className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center">
             <Avatar className="h-16 w-16">
               <AvatarFallback className="bg-brand-gradient text-lg font-semibold text-white">
-                {initials(profile.name)}
+                {initials(form.name)}
               </AvatarFallback>
             </Avatar>
             <div>
-              <h2 className="text-lg font-bold">{profile.name}</h2>
+              <h2 className="text-lg font-bold">{form.name || "—"}</h2>
               <p className="text-sm text-muted-foreground">
-                {profile.role} · joined{" "}
-                {new Date(profile.joinedAt).toLocaleDateString("en-IN", {
-                  month: "long",
-                  year: "numeric",
-                })}
+                {user?.role ?? "owner"}
+                {user?.createdAt
+                  ? ` · joined ${new Date(user.createdAt).toLocaleDateString("en-IN", { month: "long", year: "numeric" })}`
+                  : ""}
               </p>
             </div>
           </CardContent>
@@ -154,23 +118,19 @@ export default function Profile() {
           <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>Full Name</Label>
-              <Input value={profile.name} onChange={(e) => update({ name: e.target.value })} />
+              <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
             </div>
             <div className="space-y-1.5">
               <Label>Email</Label>
-              <Input
-                type="email"
-                value={profile.email}
-                onChange={(e) => update({ email: e.target.value })}
-              />
+              <Input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
             </div>
             <div className="space-y-1.5">
               <Label>Phone</Label>
-              <Input value={profile.phone} onChange={(e) => update({ phone: e.target.value })} />
+              <Input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
             </div>
             <div className="space-y-1.5">
               <Label>Role</Label>
-              <Input value={profile.role} disabled />
+              <Input value={user?.role ?? "owner"} disabled />
             </div>
           </CardContent>
         </Card>
@@ -218,8 +178,13 @@ export default function Profile() {
                   <p className="text-xs text-muted-foreground">{opt.note}</p>
                 </div>
                 <Switch
-                  checked={profile.notifications[opt.key]}
-                  onCheckedChange={(v) => updateNotification(opt.key, v)}
+                  checked={!!form.notifications[opt.key]}
+                  onCheckedChange={(v) =>
+                    setForm((f) => ({
+                      ...f,
+                      notifications: { ...f.notifications, [opt.key]: v },
+                    }))
+                  }
                 />
               </label>
             ))}

@@ -2,11 +2,11 @@
 // add-to-cart with quantity steppers (PRD §5, §8.1, §8.2). Sticky category bar
 // and a cart bar that appears once items are added.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Minus, Plus, Search, Star } from "lucide-react";
 
-import { requestJson } from "@/api";
+import { useRestaurantMenu } from "@/hooks/customer/useMenu";
 import { cn } from "@/lib/utils";
 import CustomerLayout, { FoodThumb, VegDot, formatPrice } from "./CustomerLayout";
 import { useCustomer } from "./CustomerApp";
@@ -14,12 +14,22 @@ import { useCustomer } from "./CustomerApp";
 export default function Menu() {
   const navigate = useNavigate();
   const { session, cart, cartCount, cartTotal, addToCart, setQuantity } = useCustomer();
-  const [data, setData] = useState(null);
-  const [error, setError] = useState("");
-  const [search, setSearch] = useState("");
+
+  // restaurantId comes from QR landing (stored in session) or defaults to a static value
+  const restaurantId = session.restaurantId;
+  const { data: menuData, isLoading, isError } = useRestaurantMenu(restaurantId);
+
+  const [search, setSearch]               = useState("");
   const [activeCategory, setActiveCategory] = useState("Recommended");
-  const [foodFilter, setFoodFilter] = useState("All");
+  const [foodFilter, setFoodFilter]         = useState("All");
   const sectionRefs = useRef({});
+
+  const data = useMemo(() => {
+    if (!menuData) return null;
+    const items = menuData.items ?? menuData.menuItems ?? [];
+    const categoryNames = [...new Set(items.map((i) => i.category?.name ?? i.category ?? ""))].filter(Boolean);
+    return { items, categories: ["Recommended", ...categoryNames] };
+  }, [menuData]);
 
   // Food-type chips: "All" plus whichever types the menu actually contains.
   const foodFilters = useMemo(() => {
@@ -33,13 +43,7 @@ export default function Menu() {
     ];
   }, [data]);
 
-  useEffect(() => {
-    requestJson("/customer/menu")
-      .then((payload) => setData(payload.data))
-      .catch((err) => setError(err.message));
-  }, []);
-
-  const qtyFor = (id) => cart.find((line) => line.id === id)?.quantity ?? 0;
+  const qtyFor = (id) => cart.find((line) => line.id === id || line.id === String(id))?.quantity ?? 0;
 
   const grouped = useMemo(() => {
     if (!data) return [];
@@ -48,11 +52,10 @@ export default function Menu() {
       .map((category) => ({
         category,
         items: data.items.filter((item) => {
-          const inCategory =
-            category === "Recommended" ? item.popular : item.category === category;
+          const cat = item.category?.name ?? item.category ?? "";
+          const inCategory = category === "Recommended" ? item.popular : cat === category;
           const matchesSearch = !term || item.name.toLowerCase().includes(term);
-          const matchesFood =
-            foodFilter === "All" || item.foodType === foodFilter.toLowerCase();
+          const matchesFood   = foodFilter === "All" || item.foodType === foodFilter.toLowerCase();
           return inCategory && matchesSearch && matchesFood;
         }),
       }))
@@ -64,14 +67,14 @@ export default function Menu() {
     sectionRefs.current[category]?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  if (error && !data) {
+  if (isError) {
     return (
       <CustomerLayout title="Menu" showNav activeNav="Menu">
-        <p className="px-5 py-8 text-sm text-muted-foreground">Failed to load: {error}</p>
+        <p className="px-5 py-8 text-sm text-muted-foreground">Failed to load menu.</p>
       </CustomerLayout>
     );
   }
-  if (!data) {
+  if (isLoading || !data) {
     return (
       <CustomerLayout title="Menu" showNav activeNav="Menu">
         <p className="px-5 py-8 text-sm text-muted-foreground">Loading menu…</p>

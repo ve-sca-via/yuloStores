@@ -2,10 +2,18 @@
 // with a full discount configuration, a live coupon preview, and a managed list
 // of active/scheduled/expired offers (PRD §17).
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ArrowLeft, Copy, ImagePlus, Pencil, Trash2 } from "lucide-react";
 
-import { requestJson } from "@/api";
+import { useOwnerAuth } from "@/context/OwnerAuthContext";
+import {
+  useDiscounts,
+  useCreateDiscount,
+  useUpdateDiscount,
+  useDeleteDiscount,
+  usePublishDiscount,
+} from "@/hooks/owner/useDiscounts";
+import { useMenuItems } from "@/hooks/owner/useMenuItems";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -107,63 +115,60 @@ function RupeeInput({ value, onChange, placeholder }) {
 }
 
 export default function Offers() {
-  const [offers, setOffers] = useState([]);
-  const [items, setItems] = useState([]);
-  const [error, setError] = useState("");
-  const [loaded, setLoaded] = useState(false);
-  const [form, setForm] = useState(EMPTY);
-  const [search, setSearch] = useState("");
-  const [saving, setSaving] = useState(false);
+  const { restaurantId } = useOwnerAuth();
+  const { data: offers = [], isLoading } = useDiscounts(restaurantId);
+  const { data: menuItems = [] }         = useMenuItems(restaurantId);
+  const items = menuItems;
+
+  const createMutation  = useCreateDiscount(restaurantId);
+  const updateMutation  = useUpdateDiscount(restaurantId);
+  const deleteMutation  = useDeleteDiscount(restaurantId);
+  const publishMutation = usePublishDiscount(restaurantId);
+
+  const [form, setForm]               = useState(EMPTY);
+  const [search, setSearch]           = useState("");
+  const [error, setError]             = useState("");
   const [editingOffer, setEditingOffer] = useState(null);
-  const [editForm, setEditForm] = useState(null);
-
-  function load() {
-    requestJson("/restaurant_owner/offers")
-      .then((payload) => {
-        setOffers(payload.data.offers);
-        setItems(payload.data.items ?? []);
-        setLoaded(true);
-      })
-      .catch((err) => setError(err.message));
-  }
-
-  useEffect(load, []);
+  const [editForm, setEditForm]       = useState(null);
 
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
 
-  async function publish() {
-    if (!form.name.trim()) {
-      setError("Add an offer name before publishing");
-      return;
+  // Map frontend form shape → backend Zod schema shape
+  function toPayload(f) {
+    const typeMap = { percent: "percentage", flat: "flat_amount", free_item: "free_item", tableware: "tablewise" };
+    const applicableMap = { "dine-in": "dine_in", delivery: "delivery", both: "both" };
+
+    const payload = {
+      offerName:          f.name,
+      type:               typeMap[f.discountType] ?? "percentage",
+      code:               f.code || undefined,
+      applicableTo:       applicableMap[f.applicableFor] ?? "both",
+      minimumOrderValue:  f.minOrder ? Number(f.minOrder) : 0,
+      startDate:          f.validFrom,
+      endDate:            f.validTo,
+    };
+
+    if (payload.type === "percentage")  payload.percentage  = Number(f.discountValue);
+    if (payload.type === "flat_amount") payload.flatAmount  = Number(f.discountValue);
+    if (payload.type === "free_item")   payload.freeItemId  = f.item;
+    if (payload.type === "tablewise") {
+      payload.flatAmount = Number(f.discountValue);
+      payload.applicableTableNumbers = f.tableNumbers
+        ? f.tableNumbers.split(",").map((s) => s.trim()).filter(Boolean)
+        : [];
     }
-    setSaving(true);
-    setError("");
-    try {
-      await requestJson("/restaurant_owner/offers", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      setForm(EMPTY);
-      load();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
-    }
+    return payload;
   }
 
-  async function remove(id) {
-    setOffers((current) => current.filter((o) => o.id !== id));
+  async function publish() {
+    if (!form.name.trim()) { setError("Add an offer name before publishing"); return; }
+    if (!form.validFrom || !form.validTo) { setError("Start date and end date are required"); return; }
+    setError("");
     try {
-      await requestJson(`/restaurant_owner/offers/${id}`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
+      await createMutation.mutateAsync(toPayload(form));
+      setForm(EMPTY);
     } catch (err) {
-      setError(err.message);
-      load();
+      setError(err.response?.data?.message ?? err.message);
     }
   }
 
@@ -178,36 +183,28 @@ export default function Offers() {
   }
 
   async function saveEdit() {
-    setSaving(true);
     setError("");
     try {
-      await requestJson(`/restaurant_owner/offers/${editingOffer.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(editForm),
-      });
-      setOffers((current) =>
-        current.map((o) => (o.id === editingOffer.id ? { ...o, ...editForm } : o)),
-      );
+      await updateMutation.mutateAsync({ dId: editingOffer._id, body: toPayload(editForm) });
       cancelEdit();
     } catch (err) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
+      setError(err.response?.data?.message ?? err.message);
     }
   }
 
   async function deleteOffer(id) {
-    await remove(id);
+    await deleteMutation.mutateAsync(id);
     cancelEdit();
   }
 
+  const saving = createMutation.isPending || updateMutation.isPending;
+
   const visible = useMemo(
-    () => offers.filter((o) => o.name.toLowerCase().includes(search.toLowerCase())),
+    () => offers.filter((o) => (o.offerName ?? "").toLowerCase().includes(search.toLowerCase())),
     [offers, search],
   );
 
-  if (!loaded && !error) {
+  if (isLoading) {
     return (
       <DashboardLayout>
         <p className="text-muted-foreground">Loading offers…</p>
@@ -311,7 +308,7 @@ export default function Offers() {
         <div className="flex items-center justify-between">
           <button
             type="button"
-            onClick={() => deleteOffer(editingOffer.id)}
+            onClick={() => deleteOffer(editingOffer._id ?? editingOffer.id)}
             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-brand-maroon"
           >
             <Trash2 className="h-4 w-4" /> Delete
@@ -676,9 +673,9 @@ export default function Offers() {
             </TableHeader>
             <TableBody>
               {visible.map((offer) => (
-                <TableRow key={offer.id}>
+                <TableRow key={offer._id ?? offer.id}>
                   <TableCell className="pl-6">
-                    <span className="font-semibold">{offer.name}</span>
+                    <span className="font-semibold">{offer.offerName}</span>
                     {offer.code ? (
                       <span className="ml-2 font-mono text-xs text-muted-foreground">{offer.code}</span>
                     ) : null}
@@ -698,7 +695,7 @@ export default function Offers() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => remove(offer.id)}
+                        onClick={() => deleteOffer(offer._id ?? offer.id)}
                         className="text-muted-foreground hover:text-brand-maroon"
                         aria-label="Delete"
                       >

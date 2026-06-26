@@ -1,9 +1,33 @@
-import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, ChefHat, Eye, MoreHorizontal, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { CheckCircle2, ChefHat, Eye, LogOut, MoreHorizontal, X } from "lucide-react";
 
-import { requestJson } from "@/api";
+import { useStaffAuth } from "@/context/StaffAuthContext";
+import { useKitchenQueue, useKitchenBoard, useUpdateOrderStatus } from "@/hooks/staff/useKitchen";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+
+/* ── Normalize backend Order → UI shape ──────────────────────────────
+   Backend fields: _id, type, tableNumber, items[].name, status,
+                   specialInstructions, subtotal
+   UI expects:     id, number, table, orderType, items[].title, status,
+                   orderStatus, instructions
+*/
+function normalizeOrder(o) {
+  return {
+    id:               String(o._id),
+    number:           String(o._id).slice(-5),
+    table:            o.tableNumber ?? "—",
+    orderType:        o.type ?? "dine_in",
+    items:            (o.items ?? []).map((i) => ({ ...i, title: i.name })),
+    status:           o.status,
+    orderStatus:      o.status,
+    instructions:     o.specialInstructions ?? "",
+    batches:          null,
+    estimatedMinutes: null,
+    assignedChef:     null,
+  };
+}
 
 /* ── helpers ── */
 function estTime(order) {
@@ -25,7 +49,7 @@ function isTakeaway(order) {
 }
 
 function statusOf(order) {
-  return order.status ?? order.orderStatus ?? "pending";
+  return order.status ?? "pending";
 }
 
 /* ── Upcoming card ── */
@@ -36,7 +60,7 @@ function UpcomingCard({ order, onStart }) {
     <div className="flex flex-col rounded-2xl border border-brand-cream/70 bg-white p-4 shadow-sm">
       <div className="mb-2 flex items-center justify-between">
         <span className="rounded-full bg-brand-cream/50 px-2.5 py-0.5 text-[10px] font-bold tracking-wide text-muted-foreground">
-          #ORD-{String(order.number ?? "").padStart(4, "0")}
+          #{order.number}
         </span>
         <span className={cn("text-[11px] font-bold", mins <= 15 ? "text-brand-orange" : "text-brand-maroon")}>
           {mins} min est.
@@ -63,7 +87,6 @@ function UpcomingCard({ order, onStart }) {
   );
 }
 
-/* ── helpers ── */
 function toBatches(items, size = 3) {
   const out = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
@@ -81,7 +104,7 @@ function OrderDetailsDrawer({ order, onClose, onMarkReady }) {
   }, []);
 
   const batches = order.batches ?? toBatches(order.items);
-  const status = order.status ?? order.orderStatus ?? "preparing";
+  const status = statusOf(order);
   const take = isTakeaway(order);
   const tableLabel = (!order.table || order.table === "—")
     ? (take ? "Takeaway" : "Online Order")
@@ -97,7 +120,6 @@ function OrderDetailsDrawer({ order, onClose, onMarkReady }) {
 
   return (
     <>
-      {/* Backdrop */}
       <div
         className={cn(
           "fixed inset-0 z-40 bg-black/10 transition-opacity duration-300",
@@ -105,19 +127,16 @@ function OrderDetailsDrawer({ order, onClose, onMarkReady }) {
         )}
         onClick={onClose}
       />
-
-      {/* Panel */}
       <div
         className={cn(
           "fixed right-0 top-0 z-50 flex h-full w-[400px] flex-col bg-white shadow-2xl transition-transform duration-300 ease-in-out",
           open ? "translate-x-0" : "translate-x-full",
         )}
       >
-        {/* Header */}
         <div className="flex items-start justify-between border-b border-brand-cream/60 px-6 py-5">
           <div>
             <p className="text-lg font-bold text-[#24190f]">
-              Order #ORD-{String(order.number ?? "").padStart(5, "0")}
+              Order #{order.number}
             </p>
             <p className="text-sm text-muted-foreground">
               {tableLabel} &bull; {modeLabel}
@@ -132,11 +151,10 @@ function OrderDetailsDrawer({ order, onClose, onMarkReady }) {
           </button>
         </div>
 
-        {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
           {batches.map((batch, bIdx) => {
             const isLast = bIdx === batches.length - 1;
-            const batchDone = !isLast || status === "ready" || status === "completed";
+            const batchDone = !isLast || status === "ready" || status === "delivered";
             return (
               <div key={bIdx}>
                 <div className="mb-3 flex items-center justify-between">
@@ -173,7 +191,6 @@ function OrderDetailsDrawer({ order, onClose, onMarkReady }) {
             );
           })}
 
-          {/* Special instructions */}
           {order.instructions && (
             <div className="rounded-2xl border border-brand-orange/20 bg-[#FFF5EE] p-4">
               <div className="mb-2 flex items-center gap-2">
@@ -187,7 +204,6 @@ function OrderDetailsDrawer({ order, onClose, onMarkReady }) {
           )}
         </div>
 
-        {/* Footer */}
         {status === "preparing" && (
           <div className="border-t border-brand-cream/60 px-6 py-4">
             <button
@@ -221,17 +237,16 @@ function BoardCard({ order, column, onAction, onViewDetails }) {
   return (
     <div className={cn(
       "rounded-2xl border bg-white p-4 shadow-sm transition",
-      column === "ready" && "border-emerald-200",
+      column === "ready"    && "border-emerald-200",
       column === "preparing" && !cancelled && "border-brand-cream/70",
-      cancelled && "border-red-100 opacity-80",
-      column === "done" && "border-gray-200",
+      cancelled             && "border-red-100 opacity-80",
+      column === "done"     && "border-gray-200",
     )}>
-      {/* Card header */}
       <div className="mb-2 flex items-center justify-between">
         <span className="rounded-full bg-brand-cream/50 px-2.5 py-0.5 text-[10px] font-bold tracking-wide text-muted-foreground">
-          #{order.number ?? order.id?.slice(-4)}
+          #{order.number}
         </span>
-        {(column === "ready" || column === "done") && (
+        {column === "ready" && (
           <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-700">
             Ready for pickup
           </span>
@@ -243,12 +258,10 @@ function BoardCard({ order, column, onAction, onViewDetails }) {
         )}
       </div>
 
-      {/* Order label */}
       <p className={cn("mb-3 font-bold leading-snug", take ? "text-brand-orange" : "text-[#24190f]")}>
         {orderLabel(order)}
       </p>
 
-      {/* Items */}
       <div className="mb-4 space-y-1.5 border-b border-brand-cream/50 pb-3">
         {order.items.map((item, i) => (
           <p key={i} className="text-sm text-[#5a403e]">
@@ -257,7 +270,6 @@ function BoardCard({ order, column, onAction, onViewDetails }) {
         ))}
       </div>
 
-      {/* Actions */}
       {column === "preparing" && !cancelled && (
         <div className="space-y-2">
           <button
@@ -285,7 +297,7 @@ function BoardCard({ order, column, onAction, onViewDetails }) {
           <button
             type="button"
             disabled={busy}
-            onClick={() => act("completed")}
+            onClick={() => act("delivered")}
             className="w-full rounded-xl bg-[#1C1C1E] py-2.5 text-sm font-bold text-white transition hover:bg-black disabled:opacity-60"
           >
             {busy ? "Updating…" : "Mark Completed"}
@@ -330,8 +342,8 @@ function OrdersTable({ orders }) {
         <span>Order ID</span>
         <span>Table / Mode</span>
         <span>Items</span>
-        <span>Assigned Chef</span>
-        <span>Duration</span>
+        <span>Status</span>
+        <span>Est.</span>
       </div>
       {orders.map((order, idx) => {
         const take = isTakeaway(order);
@@ -345,14 +357,12 @@ function OrdersTable({ orders }) {
               idx > 0 && "border-t border-brand-cream/40",
             )}
           >
-            <span className="text-sm font-bold text-[#24190f]">
-              #ORD-{String(order.number ?? "").padStart(4, "0")}
-            </span>
+            <span className="text-sm font-bold text-[#24190f]">#{order.number}</span>
             <span className={cn("text-sm font-medium", take ? "text-brand-orange" : "text-[#24190f]")}>
               {orderLabel(order)}
             </span>
             <span className="truncate pr-4 text-sm text-muted-foreground">{summary}</span>
-            <span className="text-sm text-[#24190f]">{order.assignedChef ?? "—"}</span>
+            <span className="text-sm capitalize text-[#24190f]">{order.status}</span>
             <span>
               <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
                 {duration} min
@@ -365,7 +375,6 @@ function OrdersTable({ orders }) {
   );
 }
 
-/* ── Column header ── */
 function BoardColumn({ label, count, accent, bg, children }) {
   return (
     <div className={cn("flex min-h-[320px] flex-col rounded-2xl p-4", bg)}>
@@ -382,53 +391,32 @@ function BoardColumn({ label, count, accent, bg, children }) {
 
 /* ── Main ── */
 export default function ChefDashboard() {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState("");
+  const navigate = useNavigate();
+  const { staff, logout } = useStaffAuth();
+  const restaurantId = staff?.restaurantId;
   const [viewOrder, setViewOrder] = useState(null);
-  const timer = useRef(null);
 
-  function load() {
-    requestJson("/chef/dashboard")
-      .then((payload) => setData(payload.data))
-      .catch((err) => setError(err.message));
+  async function handleLogout() {
+    await logout();
+    navigate("/staff/login", { replace: true });
   }
 
-  useEffect(() => {
-    load();
-    timer.current = window.setInterval(load, 10000);
-    return () => window.clearInterval(timer.current);
-  }, []);
+  const { data: rawQueue, isLoading: queueLoading, error: queueErr } = useKitchenQueue(restaurantId);
+  const { data: rawBoard, error: boardErr } = useKitchenBoard(restaurantId);
+  const { mutate: updateStatus } = useUpdateOrderStatus(restaurantId);
 
-  async function setStatus(orderId, orderStatus) {
-    // Optimistic update — don't wait for API round-trip
-    setData((cur) => {
-      if (!cur) return cur;
-      return {
-        ...cur,
-        orders: cur.orders.map((o) =>
-          o.id === orderId ? { ...o, status: orderStatus, orderStatus } : o,
-        ),
-      };
-    });
-    try {
-      await requestJson(`/chef/orders/${orderId}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderStatus }),
-      });
-    } catch (err) {
-      setError(err.message);
-      load();
-    }
+  // Normalize backend data → UI shape
+  const upcoming  = (rawQueue ?? []).map(normalizeOrder);
+  const preparing = (rawBoard?.preparing ?? []).map(normalizeOrder);
+  const ready     = (rawBoard?.ready ?? []).map(normalizeOrder);
+  const done      = (rawBoard?.completed ?? []).map(normalizeOrder);
+  const ongoing   = [...preparing, ...ready];
+
+  const error = (queueErr ?? boardErr)?.message ?? "";
+
+  function setStatus(orderId, newStatus) {
+    updateStatus({ orderId, newStatus });
   }
-
-  const orders    = data?.orders ?? [];
-  const upcoming  = orders.filter((o) => statusOf(o) === "pending");
-  const preparing = orders.filter((o) => ["preparing", "cancelled"].includes(statusOf(o)));
-  const ready     = orders.filter((o) => statusOf(o) === "ready");
-  const done      = orders.filter((o) => statusOf(o) === "completed");
-  const ongoing   = [...preparing.filter((o) => statusOf(o) === "preparing"), ...ready];
-  const history   = done;
 
   return (
     <div className="min-h-screen bg-brand-page font-sans text-[#24190f]">
@@ -436,16 +424,25 @@ export default function ChefDashboard() {
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-brand-cream/60 bg-[#FAFAF8] px-8 py-3 shadow-sm">
         <div className="flex items-center gap-3">
           <span className="h-9 w-9 rounded-full bg-brand-dark2" />
-          <span className="text-xl font-bold text-brand-red">Saffron Kitchen</span>
+          <span className="text-xl font-bold text-brand-red">Kitchen Display</span>
         </div>
         <div className="flex items-center gap-3">
           <Avatar>
-            <AvatarFallback className="bg-brand-gradient text-xs font-semibold text-white">AM</AvatarFallback>
+            <AvatarFallback className="bg-brand-gradient text-xs font-semibold text-white">
+              {(staff?.name ?? "?").slice(0, 2).toUpperCase()}
+            </AvatarFallback>
           </Avatar>
           <div className="flex flex-col leading-tight">
-            <span className="text-sm font-semibold">Alen Mercy</span>
-            <span className="text-xs text-muted-foreground">Chef</span>
+            <span className="text-sm font-semibold">{staff?.name ?? "Chef"}</span>
+            <span className="text-xs text-muted-foreground">Chef · {staff?.staffCode ?? ""}</span>
           </div>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="ml-4 flex items-center gap-1.5 rounded-xl border border-brand-cream px-3 py-2 text-xs font-bold text-brand-maroon hover:bg-brand-cream/30"
+          >
+            <LogOut className="h-3.5 w-3.5" /> Logout
+          </button>
         </div>
       </header>
 
@@ -455,21 +452,19 @@ export default function ChefDashboard() {
         )}
 
         {/* Stats row */}
-        {data && (
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            {[
-              { label: "Upcoming",   value: upcoming.length,  color: "text-brand-orange" },
-              { label: "Preparing",  value: preparing.length, color: "text-[#D9480F]" },
-              { label: "Ready",      value: ready.length,     color: "text-emerald-600" },
-              { label: "Completed",  value: done.length,      color: "text-[#1565C0]" },
-            ].map((s) => (
-              <div key={s.label} className="rounded-2xl border border-brand-cream/70 bg-white px-5 py-4 shadow-sm">
-                <p className="text-xs text-muted-foreground">{s.label}</p>
-                <p className={cn("mt-1 text-3xl font-bold", s.color)}>{s.value}</p>
-              </div>
-            ))}
-          </div>
-        )}
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {[
+            { label: "Upcoming",  value: upcoming.length,  color: "text-brand-orange" },
+            { label: "Preparing", value: preparing.length, color: "text-[#D9480F]" },
+            { label: "Ready",     value: ready.length,     color: "text-emerald-600" },
+            { label: "Completed", value: done.length,      color: "text-[#1565C0]" },
+          ].map((s) => (
+            <div key={s.label} className="rounded-2xl border border-brand-cream/70 bg-white px-5 py-4 shadow-sm">
+              <p className="text-xs text-muted-foreground">{s.label}</p>
+              <p className={cn("mt-1 text-3xl font-bold", s.color)}>{s.value}</p>
+            </div>
+          ))}
+        </div>
 
         {/* Upcoming Orders */}
         <section>
@@ -481,8 +476,8 @@ export default function ChefDashboard() {
               </span>
             )}
           </div>
-          {!data ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+          {queueLoading ? (
+            <p className="animate-pulse text-sm text-muted-foreground">Loading…</p>
           ) : upcoming.length === 0 ? (
             <div className="rounded-2xl border border-brand-cream/60 bg-white py-10 text-center text-sm text-muted-foreground">
               No upcoming orders right now.
@@ -529,7 +524,7 @@ export default function ChefDashboard() {
           </div>
         </section>
 
-        {/* Ongoing Orders */}
+        {/* Ongoing Orders table */}
         <section>
           <h2 className="mb-4 text-xl font-bold">Ongoing Orders</h2>
           <OrdersTable orders={ongoing} />
@@ -538,11 +533,10 @@ export default function ChefDashboard() {
         {/* Recent History */}
         <section>
           <h2 className="mb-4 text-xl font-bold">Recent History</h2>
-          <OrdersTable orders={history} />
+          <OrdersTable orders={done} />
         </section>
       </div>
 
-      {/* Order details drawer */}
       {viewOrder && (
         <OrderDetailsDrawer
           order={viewOrder}

@@ -1,13 +1,45 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, Search, Star, UtensilsCrossed, UserRound } from "lucide-react";
 
-import { requestJson } from "@/api";
+import { useStaffAuth } from "@/context/StaffAuthContext";
+import { useWaiterMenu } from "@/hooks/staff/useWaiter";
+import client from "@/api/client";
 import { cn } from "@/lib/utils";
 import WaiterLayout, { formatPrice } from "./WaiterLayout";
 import { useWaiter } from "./WaiterApp";
 
-/* ── food-type dot (small coloured square matching the design) ── */
+/* ── Normalize backend item → UI item ──────────────────────────────── */
+function normalizeItem(raw, categoryName) {
+  return {
+    id:          raw._id?.toString() ?? raw.id,
+    name:        raw.name,
+    description: raw.description ?? "",
+    image:       raw.image ?? null,
+    // backend: "veg" | "non_veg" | "egg"  →  UI: "veg" | "non-veg" | "egg"
+    foodType:    raw.foodType === "non_veg" ? "non-veg" : raw.foodType,
+    price:       raw.discountedPrice ?? raw.sellingPrice ?? 0,
+    available:   raw.isAvailable ?? true,
+    category:    categoryName,
+    popular:     false,
+    rating:      0,
+  };
+}
+
+function flattenMenu(categories = []) {
+  const items = [];
+  for (const cat of categories) {
+    const catName = cat.name ?? "";
+    for (const item of cat.items ?? []) items.push(normalizeItem(item, catName));
+    for (const sub  of cat.subCategories ?? []) {
+      for (const item of sub.items ?? []) items.push(normalizeItem(item, catName));
+    }
+  }
+  return items;
+}
+
+/* ── food-type dot ── */
 function FoodDot({ type }) {
   const t = (type ?? "").toLowerCase();
   if (t === "veg")
@@ -31,33 +63,24 @@ function FoodDot({ type }) {
 
 /* ── Food type filter row ── */
 const FOOD_FILTERS = [
-  { key: "all",           label: "All",           icon: <span className="h-2 w-2 rounded-full bg-white" /> },
-  { key: "veg",           label: "Veg",           icon: <span className="h-2 w-2 rounded-full bg-green-500" /> },
-  { key: "non-veg",       label: "Non Veg",       icon: <span className="h-2 w-2 rounded-full bg-brand-maroon" /> },
-  { key: "vegan",         label: "Vegan",         icon: <span className="text-[10px]">🌿</span> },
-  { key: "chef-specials", label: "Chef Specials", icon: <span className="text-[10px]">👨‍🍳</span> },
-  { key: "best-sellers",  label: "Best Sellers",  icon: <Star className="h-3 w-3" /> },
+  { key: "all",     label: "All",     icon: <span className="h-2 w-2 rounded-full bg-white" /> },
+  { key: "veg",     label: "Veg",     icon: <span className="h-2 w-2 rounded-full bg-green-500" /> },
+  { key: "non-veg", label: "Non Veg", icon: <span className="h-2 w-2 rounded-full bg-brand-maroon" /> },
+  { key: "egg",     label: "Egg",     icon: <span className="h-2 w-2 rounded-full bg-yellow-400" /> },
 ];
 
 function matchesFoodFilter(item, key) {
   if (key === "all") return true;
-  if (key === "veg") return item.foodType === "veg";
-  if (key === "non-veg") return item.foodType === "non-veg";
-  if (key === "vegan") return item.foodType === "vegan";
-  if (key === "chef-specials") return (item.rating ?? 0) >= 4.7;
-  if (key === "best-sellers") return item.popular === true;
-  return true;
+  return item.foodType === key;
 }
 
-/* ── Tag pills derived from item fields ── */
 function itemTags(item) {
   const tags = [];
   if (item.popular) tags.push("Popular");
-  if ((item.rating ?? 0) >= 4.7) tags.push("Top Rated");
   const t = (item.foodType ?? "").toLowerCase();
-  if (t === "veg") tags.push("Veg");
+  if (t === "veg")     tags.push("Veg");
   if (t === "non-veg") tags.push("Non Veg");
-  if (t === "vegan") tags.push("Vegan");
+  if (t === "egg")     tags.push("Egg");
   return tags.slice(0, 3);
 }
 
@@ -72,7 +95,6 @@ function ItemCard({ item, inCart, onAdd, onRemove }) {
         item.available && "hover:shadow-md",
       )}
     >
-      {/* Image */}
       <div className="relative h-[90px] w-[90px] shrink-0 overflow-hidden rounded-xl bg-brand-cream/40">
         {item.image ? (
           <img
@@ -86,7 +108,6 @@ function ItemCard({ item, inCart, onAdd, onRemove }) {
         )}
       </div>
 
-      {/* Content */}
       <div className="flex min-w-0 flex-1 flex-col justify-between">
         <div>
           <div className="mb-0.5 flex items-center gap-1.5">
@@ -153,7 +174,6 @@ function ItemCard({ item, inCart, onAdd, onRemove }) {
   );
 }
 
-/* ── Section with heading ── */
 function MenuSection({ title, items, cart, onAdd, onRemove }) {
   if (!items.length) return null;
   return (
@@ -181,48 +201,55 @@ function MenuSection({ title, items, cart, onAdd, onRemove }) {
 export default function WaiterMenu() {
   const navigate = useNavigate();
   const { activeTable, cart, cartCount, subtotal, addToCart, setQuantity } = useWaiter();
+  const { staff } = useStaffAuth();
 
   function removeOne(itemId) {
     const line = cart.find((c) => c.id === itemId);
     if (line) setQuantity(itemId, line.quantity - 1);
   }
-  const [data, setData] = useState(null);
-  const [error, setError] = useState("");
-  const [search, setSearch] = useState("");
-  const [activeCategory, setActiveCategory] = useState("");
-  const [foodFilter, setFoodFilter] = useState("all");
-  const [showSearch, setShowSearch] = useState(false);
 
-  useEffect(() => {
-    requestJson("/waiter/menu-display")
-      .then((payload) => {
-        setData(payload.data);
-        setActiveCategory(payload.data.categories[0] ?? "");
-      })
-      .catch((err) => setError(err.message));
-  }, []);
+  const { data: menuData, isLoading, isError } = useWaiterMenu(staff?.restaurantId);
+
+  // Fetch restaurant name for the header
+  const { data: restaurant } = useQuery({
+    queryKey: ["restaurant-public", staff?.restaurantId],
+    queryFn: () =>
+      client
+        .get(`/restaurants/${staff?.restaurantId}`)
+        .then((r) => r.data.data.restaurant),
+    enabled: !!staff?.restaurantId,
+    staleTime: 30 * 60_000,
+  });
+
+  // Flatten categories → normalized items
+  const rawCategories = menuData?.menu ?? [];
+  const categoryNames = rawCategories.map((c) => c.name).filter(Boolean);
+  const allItems = useMemo(() => flattenMenu(rawCategories), [menuData]);
+
+  const [search, setSearch]                 = useState("");
+  const [activeCategory, setActiveCategory] = useState("");
+  const [foodFilter, setFoodFilter]         = useState("all");
+  const [showSearch, setShowSearch]         = useState(false);
+
+  // Set first category once data loads
+  useMemo(() => {
+    if (!activeCategory && categoryNames.length > 0) setActiveCategory(categoryNames[0]);
+  }, [categoryNames.length]);
 
   const filtered = useMemo(() => {
-    if (!data) return [];
     const term = search.trim().toLowerCase();
-    return data.items.filter((item) => {
-      const inCategory = item.category === activeCategory;
-      const matchesType = matchesFoodFilter(item, foodFilter);
-      const matchesSearch = !term || item.name.toLowerCase().includes(term) || (item.description ?? "").toLowerCase().includes(term);
+    return allItems.filter((item) => {
+      const inCategory    = !activeCategory || item.category === activeCategory;
+      const matchesType   = matchesFoodFilter(item, foodFilter);
+      const matchesSearch = !term || item.name.toLowerCase().includes(term) || item.description.toLowerCase().includes(term);
       return inCategory && matchesType && matchesSearch;
     });
-  }, [data, activeCategory, foodFilter, search]);
+  }, [allItems, activeCategory, foodFilter, search]);
 
-  const popularItems = filtered.filter((i) => i.popular);
-  const otherItems = filtered.filter((i) => !i.popular);
-
-  const popularLabel = `Popular ${activeCategory}`;
-  const otherLabel = popularItems.length > 0 ? `Signature ${activeCategory}` : activeCategory;
-
-  if (error && !data) {
+  if (isError) {
     return (
       <WaiterLayout>
-        <p className="px-5 py-5 text-sm text-muted-foreground">Failed to load: {error}</p>
+        <p className="px-5 py-5 text-sm text-muted-foreground">Failed to load menu.</p>
       </WaiterLayout>
     );
   }
@@ -233,7 +260,9 @@ export default function WaiterMenu() {
       <header className="sticky top-0 z-30 bg-[#FAFAF8]">
         <div className="flex items-center justify-between border-b border-brand-cream/60 px-5 py-3">
           <div>
-            <p className="text-lg font-bold text-brand-red">Saffron Kitchen</p>
+            <p className="text-lg font-bold text-brand-red">
+              {restaurant?.name ?? "Menu"}
+            </p>
             <p className="flex items-center gap-1 text-xs text-muted-foreground">
               <UtensilsCrossed className="h-3 w-3" /> Table {activeTable}
             </p>
@@ -292,9 +321,9 @@ export default function WaiterMenu() {
         </div>
 
         {/* Category tabs */}
-        {data && (
+        {categoryNames.length > 0 && (
           <div className="flex gap-5 overflow-x-auto border-b border-brand-cream/60 px-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {data.categories.map((cat) => (
+            {categoryNames.map((cat) => (
               <button
                 key={cat}
                 type="button"
@@ -315,17 +344,24 @@ export default function WaiterMenu() {
 
       {/* ── Content ── */}
       <div className={cn("space-y-7 px-5 py-5", cartCount > 0 && "pb-24")}>
-        {!data ? (
-          <p className="text-sm text-muted-foreground">Loading menu…</p>
+        {isLoading ? (
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-24 animate-pulse rounded-2xl bg-white" />
+            ))}
+          </div>
         ) : filtered.length === 0 ? (
           <div className="rounded-2xl border border-brand-cream/60 bg-white py-14 text-center text-sm text-muted-foreground">
-            No items match this filter.
+            {allItems.length === 0 ? "Menu abhi empty hai." : "No items match this filter."}
           </div>
         ) : (
-          <>
-            <MenuSection title={popularLabel} items={popularItems} cart={cart} onAdd={addToCart} onRemove={removeOne} />
-            <MenuSection title={otherLabel} items={otherItems} cart={cart} onAdd={addToCart} onRemove={removeOne} />
-          </>
+          <MenuSection
+            title={activeCategory || "Menu"}
+            items={filtered}
+            cart={cart}
+            onAdd={addToCart}
+            onRemove={removeOne}
+          />
         )}
       </div>
 

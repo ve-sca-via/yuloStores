@@ -10,9 +10,11 @@ import {
   BadgePercent,
   Monitor,
   Store,
+  Users,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { useOwnerAuth } from "@/context/OwnerAuthContext";
 
 const NAV_SECTIONS = [
   {
@@ -50,12 +52,13 @@ const NAV_SECTIONS = [
   {
     title: "Live Monitoring",
     items: [
-      { to: "/manager/live", label: "Visitors Analysis", icon: Monitor },
+      { to: "/live-monitor", label: "Visitors Analysis", icon: Monitor },
     ],
   },
   {
     title: "Account",
     items: [
+      { to: "/staff", label: "Staff Management", icon: Users },
       { to: "/store-settings", label: "Store Settings", icon: Store },
     ],
   },
@@ -85,6 +88,12 @@ function NavItem({ icon: Icon, label, active, onClick }) {
 export default function Sidebar() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const { logout } = useOwnerAuth();
+
+  async function handleLogout() {
+    await logout();
+    navigate("/owner/login", { replace: true });
+  }
 
   return (
     <aside className="sticky top-0 flex h-screen w-[280px] shrink-0 flex-col justify-between overflow-y-auto bg-sidebar-gradient shadow-[0_20px_25px_-5px_rgba(0,0,0,0.1)]">
@@ -115,7 +124,7 @@ export default function Sidebar() {
       </div>
 
       <div className="border-t border-brand-cream/10 p-4">
-        <NavItem icon={LogOut} label="Logout" onClick={() => navigate("/")} />
+        <NavItem icon={LogOut} label="Logout" onClick={handleLogout} />
       </div>
     </aside>
   );

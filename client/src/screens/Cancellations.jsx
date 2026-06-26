@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react"; // useEffect kept for drawer animation
 import { useNavigate } from "react-router-dom";
 import { Search, X } from "lucide-react";
 
-import { requestJson } from "@/api";
+import { useOwnerAuth } from "@/context/OwnerAuthContext";
+import { useOwnerOrders } from "@/hooks/owner/useOrders";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -300,19 +301,11 @@ function CancelledOrderDrawer({ order, onClose }) {
 
 export default function Cancellations() {
   const navigate = useNavigate();
-  const [orders, setOrders] = useState(null);
-  const [error, setError] = useState("");
+  const { restaurantId } = useOwnerAuth();
+  const { data: orders = [], isLoading, isError } = useOwnerOrders(restaurantId);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("cancelled");
   const [selectedOrder, setSelectedOrder] = useState(null);
-
-  function load() {
-    requestJson("/restaurant_owner/orders")
-      .then((payload) => setOrders(payload.data.orders))
-      .catch((err) => setError(err.message));
-  }
-
-  useEffect(load, []);
 
   const counts = useMemo(() => {
     const list = orders ?? [];
@@ -340,14 +333,14 @@ export default function Cancellations() {
     };
   }, [orders, search]);
 
-  if (error && !orders) {
+  if (isError) {
     return (
       <DashboardLayout>
-        <p className="text-muted-foreground">Failed to load: {error}</p>
+        <p className="text-muted-foreground">Failed to load orders.</p>
       </DashboardLayout>
     );
   }
-  if (!orders) {
+  if (isLoading) {
     return (
       <DashboardLayout>
         <p className="text-muted-foreground">Loading…</p>

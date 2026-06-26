@@ -2,7 +2,7 @@
 // the shared DashboardLayout). Built with shadcn form primitives + Tailwind.
 // Data from the mock layer: GET /restaurant_owner/menu-management.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   ImagePlus,
   Pencil,
@@ -12,7 +12,8 @@ import {
   Upload,
 } from "lucide-react";
 
-import { requestJson } from "@/api";
+import { useOwnerAuth } from "@/context/OwnerAuthContext";
+import { useMenuItems, useCategories, useCreateCategory, useCreateMenuItem, useUpdateMenuItem } from "@/hooks/owner/useMenuItems";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,22 +40,23 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 // A ₹-prefixed number input.
-function RupeeInput({ defaultValue, className }) {
+function RupeeInput({ value, defaultValue, onChange, className }) {
   return (
     <div className="relative">
       <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
         ₹
       </span>
-      <Input defaultValue={defaultValue} className={cn("pl-7", className)} />
+      <Input value={value} defaultValue={defaultValue} onChange={onChange} className={cn("pl-7", className)} />
     </div>
   );
 }
 
 // A selectable chip (category / sub-category).
-function Chip({ label, active, dashed, icon: Icon }) {
+function Chip({ label, active, dashed, icon: Icon, onClick }) {
   return (
     <button
       type="button"
+      onClick={onClick}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition",
         active && "bg-brand-gradient text-white",
@@ -69,7 +71,7 @@ function Chip({ label, active, dashed, icon: Icon }) {
 }
 
 function VegDot({ type }) {
-  const veg = type.toLowerCase() === "veg";
+  const veg = type === "veg";
   return (
     <span
       className={cn(
@@ -82,32 +84,68 @@ function VegDot({ type }) {
   );
 }
 
+const PREP_TIME_OPTIONS = [5, 10, 15, 20, 30, 45, 60];
+
+// foodType display label → backend value
+const FOOD_TYPE_OPTIONS = [
+  { label: "VEG",     value: "veg" },
+  { label: "NON-VEG", value: "non_veg" },
+  { label: "EGG",     value: "egg" },
+];
+
 export default function MenuManagement() {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState("");
+  const { restaurantId } = useOwnerAuth();
 
-  useEffect(() => {
-    requestJson("/restaurant_owner/menu-management")
-      .then((payload) => setData(payload.data))
-      .catch((err) => setError(err.message));
-  }, []);
+  const { data: currentItems = [], isLoading } = useMenuItems(restaurantId);
+  const { data: categoryList = [] }            = useCategories(restaurantId);
+  const createMutation         = useCreateMenuItem(restaurantId);
+  const updateMutation         = useUpdateMenuItem(restaurantId);
+  const createCategoryMutation = useCreateCategory(restaurantId);
 
-  if (error) {
-    return (
-      <DashboardLayout>
-        <p className="text-muted-foreground">Failed to load: {error}</p>
-      </DashboardLayout>
-    );
+  const [item, setItem] = useState({
+    name: "", description: "", prepTime: 20,
+    sellingPrice: "", categoryId: "", categoryName: "", foodType: "veg",
+  });
+  const [imageFile, setImageFile]       = useState(null);
+  const [statusMsg, setStatusMsg]       = useState("");
+  const [newCatName, setNewCatName]     = useState("");
+  const [showNewCat, setShowNewCat]     = useState(false);
+
+  const ingredients = [];
+  const addons = [];
+
+  async function handleSubmit() {
+    setStatusMsg("");
+    if (!item.name || !item.categoryId || !item.sellingPrice) {
+      setStatusMsg("Name, category and price are required.");
+      return;
+    }
+    const formData = new FormData();
+    formData.append("name", item.name);
+    formData.append("description", item.description ?? "");
+    formData.append("sellingPrice", item.sellingPrice);
+    formData.append("categoryId", item.categoryId);
+    formData.append("foodType", item.foodType);
+    formData.append("prepTime", item.prepTime);
+    if (imageFile) formData.append("image", imageFile);
+    try {
+      if (item._id) await updateMutation.mutateAsync({ itemId: item._id, formData });
+      else          await createMutation.mutateAsync(formData);
+      setStatusMsg(item._id ? "Item updated!" : "Item created!");
+      setItem({ name: "", description: "", prepTime: 20, sellingPrice: "", categoryId: "", categoryName: "", foodType: "veg" });
+      setImageFile(null);
+    } catch (err) {
+      setStatusMsg(err.response?.data?.message ?? err.message);
+    }
   }
-  if (!data) {
+
+  if (isLoading) {
     return (
       <DashboardLayout>
         <p className="text-muted-foreground">Loading menu management…</p>
       </DashboardLayout>
     );
   }
-
-  const { item, ingredients, addons, currentItems } = data;
 
   return (
     <DashboardLayout>
@@ -131,34 +169,33 @@ export default function MenuManagement() {
             <span className="text-sm text-muted-foreground">
               Upload Food Photo or Drag &amp; Drop
             </span>
+            <input type="file" accept="image/*" className="hidden" onChange={(e) => setImageFile(e.target.files?.[0] ?? null)} />
           </label>
 
           <div className="space-y-1.5">
             <Label>Item Name</Label>
-            <Input defaultValue={item.name} />
+            <Input value={item.name} onChange={(e) => setItem((i) => ({ ...i, name: e.target.value }))} />
           </div>
 
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <Label>Description</Label>
               <span className="text-xs text-muted-foreground">
-                {item.description.length}/{item.descriptionMax}
+                {(item.description ?? "").length}/{item.descriptionMax}
               </span>
             </div>
-            <Textarea defaultValue={item.description} maxLength={item.descriptionMax} />
+            <Textarea value={item.description} maxLength={item.descriptionMax} onChange={(e) => setItem((i) => ({ ...i, description: e.target.value }))} />
           </div>
 
           <div className="space-y-1.5">
             <Label>Preparation Time</Label>
-            <Select defaultValue={item.prepTime}>
+            <Select value={String(item.prepTime)} onValueChange={(v) => setItem((i) => ({ ...i, prepTime: Number(v) }))}>
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {item.prepTimeOptions.map((o) => (
-                  <SelectItem key={o} value={o}>
-                    {o}
-                  </SelectItem>
+                {PREP_TIME_OPTIONS.map((o) => (
+                  <SelectItem key={o} value={String(o)}>{o} min</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -175,39 +212,60 @@ export default function MenuManagement() {
           <div className="space-y-2">
             <Label>Category</Label>
             <div className="flex flex-wrap gap-2">
-              {item.categories.map((c) => (
-                <Chip key={c} label={c} active={c === item.activeCategory} />
+              {categoryList.map((c) => (
+                <Chip
+                  key={c._id}
+                  label={c.name}
+                  active={c._id === item.categoryId}
+                  onClick={() => setItem((i) => ({ ...i, categoryId: c._id, categoryName: c.name }))}
+                />
               ))}
-              <Chip label="Add New" dashed icon={Plus} />
+              <Chip label="+ Add Category" dashed icon={Plus} onClick={() => setShowNewCat((v) => !v)} />
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Sub Category</Label>
-            <div className="flex flex-wrap gap-2">
-              {item.subCategories.map((c) => (
-                <Chip key={c} label={c} active={c === item.activeSubCategory} />
-              ))}
-              <Chip label="Add New" dashed icon={Plus} />
-            </div>
+            {showNewCat && (
+              <div className="flex gap-2">
+                <Input
+                  value={newCatName}
+                  onChange={(e) => setNewCatName(e.target.value)}
+                  placeholder="Category name"
+                  className="h-8 text-sm"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={!newCatName.trim() || createCategoryMutation.isPending}
+                  onClick={async () => {
+                    const res = await createCategoryMutation.mutateAsync({ name: newCatName.trim() });
+                    const cat = res.data?.data?.category;
+                    if (cat) setItem((i) => ({ ...i, categoryId: cat._id, categoryName: cat.name }));
+                    setNewCatName("");
+                    setShowNewCat(false);
+                  }}
+                >
+                  Save
+                </Button>
+              </div>
+            )}
+            {!item.categoryId && <p className="text-xs text-muted-foreground">Select or create a category</p>}
           </div>
 
           <div className="space-y-2">
             <Label>Food Type</Label>
             <div className="flex flex-wrap gap-2">
-              {item.foodTypes.map((t) => (
+              {FOOD_TYPE_OPTIONS.map(({ label, value }) => (
                 <button
-                  key={t}
+                  key={value}
                   type="button"
+                  onClick={() => setItem((i) => ({ ...i, foodType: value }))}
                   className={cn(
                     "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition",
-                    t === item.activeFoodType
+                    value === item.foodType
                       ? "border-brand-green bg-[#E8F5EC] text-brand-green"
                       : "border-brand-cream bg-white text-[#5a403e] hover:bg-brand-cream/30",
                   )}
                 >
-                  <VegDot type={t} />
-                  {t}
+                  <VegDot type={value} />
+                  {label}
                 </button>
               ))}
             </div>
@@ -216,11 +274,7 @@ export default function MenuManagement() {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>Selling Price</Label>
-              <RupeeInput defaultValue={item.sellingPrice} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Discounted Price (Optional)</Label>
-              <RupeeInput defaultValue={item.discountedPrice.toFixed(2)} />
+              <RupeeInput value={item.sellingPrice} onChange={(e) => setItem((i) => ({ ...i, sellingPrice: e.target.value }))} />
             </div>
           </div>
         </CardContent>
@@ -409,10 +463,17 @@ export default function MenuManagement() {
       </Card>
 
       {/* Footer actions */}
-      <div className="flex justify-end gap-3">
-        <Button variant="outline" className="px-6">Save Draft</Button>
-        <Button className="bg-brand-gradient px-6 text-white hover:brightness-105">
-          Publish Item
+      <div className="flex items-center justify-end gap-3">
+        {statusMsg && (
+          <span className={`text-sm font-medium ${statusMsg.includes("!") ? "text-brand-green" : "text-red-500"}`}>
+            {statusMsg}
+          </span>
+        )}
+        <Button variant="outline" className="px-6" onClick={handleSubmit} disabled={createMutation.isPending || updateMutation.isPending}>
+          Save Draft
+        </Button>
+        <Button className="bg-brand-gradient px-6 text-white hover:brightness-105" onClick={handleSubmit} disabled={createMutation.isPending || updateMutation.isPending}>
+          {createMutation.isPending || updateMutation.isPending ? "Saving…" : "Publish Item"}
         </Button>
       </div>
 
@@ -451,42 +512,39 @@ export default function MenuManagement() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {currentItems.map((mi) => (
-          <Card key={mi.id} className="overflow-hidden">
+          <Card key={mi._id} className="overflow-hidden">
             <div className="relative h-36">
-              <img
-                src={mi.image}
-                alt={mi.name}
-                className="h-full w-full object-cover"
-              />
-              <Badge
-                className={cn(
-                  "absolute left-3 top-3",
-                  mi.foodType === "VEG" ? "bg-[#E8F5EC] text-brand-green" : "bg-[#FCE9E4] text-brand-maroon",
-                )}
-              >
-                {mi.foodType}
-              </Badge>
+              {mi.image ? (
+                <img src={mi.image} alt={mi.name} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-muted text-muted-foreground text-xs">No image</div>
+              )}
+              {mi.foodType && (
+                <Badge
+                  className={cn(
+                    "absolute left-3 top-3",
+                    mi.foodType === "veg" ? "bg-[#E8F5EC] text-brand-green" : "bg-[#FCE9E4] text-brand-maroon",
+                  )}
+                >
+                  {mi.foodType.replace("_", " ").toUpperCase()}
+                </Badge>
+              )}
             </div>
             <CardContent className="space-y-3 p-4">
               <div>
                 <h3 className="font-bold leading-tight">{mi.name}</h3>
-                <p className="text-xs text-muted-foreground">{mi.category}</p>
+                <p className="text-xs text-muted-foreground">{mi.categoryId?.name ?? ""}</p>
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex flex-col">
-                  <span className="font-bold text-brand-red">{mi.price}</span>
-                  <span className="text-xs text-muted-foreground">{mi.prep}</span>
+                  <span className="font-bold text-brand-red">₹{mi.discountedPrice ?? mi.sellingPrice}</span>
+                  <span className="text-xs text-muted-foreground">{mi.prepTime ? `${mi.prepTime} min` : ""}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span
-                    className={cn(
-                      "text-[11px] font-bold",
-                      mi.available ? "text-brand-green" : "text-muted-foreground",
-                    )}
-                  >
-                    {mi.available ? "AVAILABLE" : "UNAVAILABLE"}
+                  <span className={cn("text-[11px] font-bold", mi.isAvailable ? "text-brand-green" : "text-muted-foreground")}>
+                    {mi.isAvailable ? "AVAILABLE" : "UNAVAILABLE"}
                   </span>
-                  <Switch defaultChecked={mi.available} />
+                  <Switch defaultChecked={mi.isAvailable} />
                 </div>
               </div>
             </CardContent>

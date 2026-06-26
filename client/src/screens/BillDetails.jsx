@@ -3,8 +3,8 @@
 // from the dashboard kitchen queue / operations command center "View Bill".
 // Data from the mock layer: GET /restaurant_owner/bill.
 
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   Check,
@@ -18,7 +18,8 @@ import {
   User,
 } from "lucide-react";
 
-import { requestJson } from "@/api";
+import { useOwnerAuth } from "@/context/OwnerAuthContext";
+import { useBill } from "@/hooks/owner/useBills";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -60,46 +61,28 @@ function BatchCard({ batch }) {
 
 export default function BillDetails() {
   const navigate = useNavigate();
-  const [data, setData] = useState(null);
-  const [error, setError] = useState("");
+  const [searchParams] = useSearchParams();
+  const { restaurantId } = useOwnerAuth();
+
+  const billId  = searchParams.get("billId");
+  const orderId = searchParams.get("orderId");
+
+  const { data, isLoading, isError } = useBill(restaurantId, billId ?? orderId);
+
   const [invoiceOpen, setInvoiceOpen] = useState(true);
-  const [paid, setPaid] = useState(false);
-  const [marking, setMarking] = useState(false);
+  const paid = data?.paymentStatus === "paid";
 
-  useEffect(() => {
-    requestJson("/restaurant_owner/bill")
-      .then((payload) => {
-        setData(payload.data);
-        setPaid(payload.data.paymentStatus === "paid");
-      })
-      .catch((err) => setError(err.message));
-  }, []);
+  // Payment via waiter API — owner view is read-only
+  function handleMarkPaid() {}
 
-  async function handleMarkPaid() {
-    if (!data?.orderId || paid || marking) return;
-    setMarking(true);
-    try {
-      await requestJson(`/restaurant_owner/orders/${data.orderId}/payment`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentStatus: "paid" }),
-      });
-      setPaid(true);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setMarking(false);
-    }
-  }
-
-  if (error) {
+  if (isError) {
     return (
       <DashboardLayout>
-        <p className="text-muted-foreground">Failed to load: {error}</p>
+        <p className="text-muted-foreground">Failed to load bill.</p>
       </DashboardLayout>
     );
   }
-  if (!data) {
+  if (isLoading || !data) {
     return (
       <DashboardLayout>
         <p className="text-muted-foreground">Loading bill…</p>
@@ -107,7 +90,8 @@ export default function BillDetails() {
     );
   }
 
-  const { summary, invoice } = data;
+  const summary = data.summary ?? data;
+  const invoice = data.invoice ?? {};
 
   return (
     <DashboardLayout>

@@ -2,11 +2,10 @@
 // the restaurant workflow (PRD §9 lifecycle, §18 NOTIF-03). Reflects the same
 // status the owner/chef/waiter advance, so the demo loop is end-to-end.
 
-import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Check, Clock, XCircle } from "lucide-react";
 
-import { requestJson } from "@/api";
+import { useCustomerOrder } from "@/hooks/customer/useCustomerOrders";
 import { cn } from "@/lib/utils";
 import CustomerLayout, { formatPrice } from "./CustomerLayout";
 
@@ -27,35 +26,16 @@ function orderTotal(order) {
 export default function OrderStatus() {
   const { orderId } = useParams();
   const navigate = useNavigate();
-  const [order, setOrder] = useState(null);
-  const [error, setError] = useState("");
-  const timer = useRef(null);
+  const { data: order, isLoading, isError } = useCustomerOrder(orderId, { pollInterval: 4000 });
 
-  useEffect(() => {
-    let active = true;
-    function poll() {
-      requestJson(`/customer/orders/${orderId}`)
-        .then((payload) => {
-          if (active) setOrder(payload.data.order);
-        })
-        .catch((err) => active && setError(err.message));
-    }
-    poll();
-    timer.current = window.setInterval(poll, 4000);
-    return () => {
-      active = false;
-      window.clearInterval(timer.current);
-    };
-  }, [orderId]);
-
-  if (error && !order) {
+  if (isError) {
     return (
       <CustomerLayout title="Order status" showBack onBack={() => navigate("/order/menu")}>
-        <p className="px-5 py-8 text-sm text-muted-foreground">{error}</p>
+        <p className="px-5 py-8 text-sm text-muted-foreground">Failed to load order status.</p>
       </CustomerLayout>
     );
   }
-  if (!order) {
+  if (isLoading || !order) {
     return (
       <CustomerLayout title="Order status" showBack onBack={() => navigate("/order/menu")}>
         <p className="px-5 py-8 text-sm text-muted-foreground">Loading…</p>
@@ -74,7 +54,7 @@ export default function OrderStatus() {
         <div className="rounded-2xl border border-brand-cream/70 bg-white p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground">Order #{order.id.slice(-6)}</p>
+              <p className="text-sm text-muted-foreground">Order #{(order._id ?? order.id ?? "").slice(-6)}</p>
               <p className="font-semibold capitalize">
                 {order.tableNumber ? `Table ${order.tableNumber}` : order.orderType}
               </p>
@@ -136,12 +116,12 @@ export default function OrderStatus() {
         <div className="rounded-2xl border border-brand-cream/70 bg-white p-4">
           <p className="mb-3 text-sm font-semibold">Order summary</p>
           <div className="space-y-2">
-            {order.items.map((item) => (
-              <div key={item.recipeId} className="flex justify-between text-sm">
+            {(order.items ?? []).map((item, idx) => (
+              <div key={item._id ?? item.recipeId ?? idx} className="flex justify-between text-sm">
                 <span className="text-muted-foreground">
-                  {item.quantity}× {item.title}
+                  {item.quantity}× {item.name ?? item.menuItem?.name ?? item.title}
                 </span>
-                <span className="font-medium">{formatPrice(item.price * item.quantity)}</span>
+                <span className="font-medium">{formatPrice((item.price ?? 0) * (item.quantity ?? 1))}</span>
               </div>
             ))}
           </div>

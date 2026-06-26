@@ -2,10 +2,11 @@
 // unique table ordering link + QR, and a grid of generated codes (right) with
 // download / print / regenerate actions and active/void status (PRD §6, §16).
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Download, Printer, QrCode, RotateCcw, Search } from "lucide-react";
 
-import { requestJson } from "@/api";
+import { useOwnerAuth } from "@/context/OwnerAuthContext";
+import { useTables, useCreateTable, useGenerateQR, useVoidQR } from "@/hooks/owner/useTables";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,62 +45,63 @@ function printQr(code) {
 }
 
 export default function QrManagement() {
-  const [codes, setCodes] = useState(null);
-  const [error, setError] = useState("");
-  const [identifier, setIdentifier] = useState("14");
-  const [search, setSearch] = useState("");
-  const [generated, setGenerated] = useState(null);
-  const [generating, setGenerating] = useState(false);
+  const { restaurantId } = useOwnerAuth();
+  const { data: tables = [], isLoading } = useTables(restaurantId);
+  const createTable = useCreateTable(restaurantId);
+  const generateQR  = useGenerateQR(restaurantId);
+  const voidQR      = useVoidQR(restaurantId);
 
-  function load() {
-    requestJson("/restaurant_owner/qr-codes")
-      .then((payload) => setCodes(payload.data.codes))
-      .catch((err) => setError(err.message));
-  }
+  const [tableNumber, setTableNumber] = useState("14");
+  const [search, setSearch]           = useState("");
+  const [generated, setGenerated]     = useState(null);
 
-  useEffect(load, []);
+  // Map tables to the code shape the UI expects
+  const codes = tables.map((t) => ({
+    id:          t._id,
+    label:       `Table ${t.identifier}`,
+    qrImageUrl:  t.qrCode?.imageUrl ?? "",
+    link:        t.qrCode?.url ?? "",
+    active:      t.qrCode?.status === "active",
+    generatedAt: t.qrCode?.generatedAt ?? t.updatedAt,
+  }));
 
   async function generate(event) {
     event.preventDefault();
-    if (!identifier.trim()) return;
-    setGenerating(true);
-    setError("");
+    if (!tableNumber.trim()) return;
     try {
-      const payload = await requestJson("/restaurant_owner/qr-codes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          label: `Table ${identifier}`,
-          type: "table",
-          context: `T-${identifier}`,
-        }),
-      });
-      load();
-      // Re-fetch the enriched (link + image) version for the preview.
-      const refreshed = await requestJson("/restaurant_owner/qr-codes");
-      setGenerated(refreshed.data.codes.find((c) => c.id === payload.data.code.id) ?? null);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setGenerating(false);
+      // Find or create the table by identifier
+      let table = tables.find((t) => String(t.identifier) === String(tableNumber.trim()));
+      if (!table) {
+        const res = await createTable.mutateAsync({ identifier: tableNumber.trim() });
+        table = res.data?.data?.table;
+      }
+      if (!table?._id) return;
+
+      const result = await generateQR.mutateAsync(table._id);
+      const qr = result.data?.data?.qr;
+      if (qr) {
+        setGenerated({
+          id:         table._id,
+          label:      `Table ${table.identifier}`,
+          qrImageUrl: qr.imageUrl,
+          link:       qr.url,
+        });
+      }
+    } catch {
+      // error shown via generateQR.isError
     }
   }
 
-  async function regenerate(code) {
-    // Toggle void→active as a stand-in for re-issuing the code.
-    try {
-      await requestJson(`/restaurant_owner/qr-codes/${code.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ active: !code.active }),
-      });
-      load();
-    } catch (err) {
-      setError(err.message);
-    }
+  function regenerate(code) {
+    // Always regenerate (generates a new QR, replacing the old one)
+    generateQR.mutate(code.id);
   }
 
-  const visible = (codes ?? []).filter((c) =>
+  // identifier alias for the form
+  const identifier = tableNumber;
+  const setIdentifier = setTableNumber;
+
+  const visible = codes.filter((c) =>
     c.label.toLowerCase().includes(search.toLowerCase()),
   );
 
@@ -122,7 +124,7 @@ export default function QrManagement() {
         />
       </div>
 
-      {error ? <p className="text-sm text-brand-maroon">{error}</p> : null}
+      {generateQR.isError ? <p className="text-sm text-brand-maroon">Failed to generate QR</p> : null}
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[320px_1fr]">
         {/* Generate panel */}
@@ -142,10 +144,10 @@ export default function QrManagement() {
               </div>
               <Button
                 type="submit"
-                disabled={generating}
+                disabled={generateQR.isPending}
                 className="w-full gap-2 bg-brand-gradient text-white hover:brightness-105"
               >
-                <QrCode className="h-4 w-4" /> {generating ? "Generating…" : "Generate QR Code"}
+                <QrCode className="h-4 w-4" /> {generateQR.isPending ? "Generating…" : "Generate QR Code"}
               </Button>
             </form>
 
@@ -162,14 +164,7 @@ export default function QrManagement() {
                   <Button
                     variant="outline"
                     className="flex-1 gap-1.5"
-                    onClick={() => {
-                      downloadQr(generated);
-                      setCodes((prev) => {
-                        const list = prev ?? [];
-                        const alreadyExists = list.some((c) => c.id === generated.id);
-                        return alreadyExists ? list : [generated, ...list];
-                      });
-                    }}
+                    onClick={() => downloadQr(generated)}
                   >
                     <Download className="h-3.5 w-3.5" /> Save QR
                   </Button>

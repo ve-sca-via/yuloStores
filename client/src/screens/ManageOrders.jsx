@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { RefreshCw, X } from "lucide-react";
 
-import { requestJson } from "@/api";
+import { useOwnerAuth } from "@/context/OwnerAuthContext";
+import { useOwnerOrders } from "@/hooks/owner/useOrders";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -100,7 +101,7 @@ function OrderDrawer({ order, onClose, onCancel, onMarkPaid }) {
   async function handleMarkPaid() {
     if (isPaid || marking) return;
     setMarking(true);
-    await onMarkPaid(order.id);
+    await onMarkPaid(order._id ?? order.id);
     setMarking(false);
   }
 
@@ -130,7 +131,7 @@ function OrderDrawer({ order, onClose, onCancel, onMarkPaid }) {
         {/* Header */}
         <div className="flex items-start justify-between border-b border-brand-cream/60 px-5 py-4">
           <div>
-            <p className="font-bold">Order #{order.id.slice(-8).toUpperCase()}</p>
+            <p className="font-bold">Order #{order._id ?? order.id.slice(-8).toUpperCase()}</p>
             <p className="text-xs text-muted-foreground">
               Table {order.tableNumber} &bull; {order.orderType ?? "Dine-In"}
             </p>
@@ -231,7 +232,7 @@ function OrderDrawer({ order, onClose, onCancel, onMarkPaid }) {
             </Button>
             <button
               type="button"
-              onClick={() => navigate(`/bill?orderId=${order.id}`)}
+              onClick={() => navigate(`/bill?orderId=${order._id ?? order.id}`)}
               className="w-full rounded-lg border border-brand-cream py-2 text-sm font-medium text-[#5a403e] hover:bg-brand-cream/20"
             >
               View Bill
@@ -244,50 +245,14 @@ function OrderDrawer({ order, onClose, onCancel, onMarkPaid }) {
 }
 
 export default function ManageOrders() {
-  const [orders, setOrders] = useState(null);
-  const [error, setError] = useState("");
+  const { restaurantId } = useOwnerAuth();
+  const { data: orders = [], isLoading, isError, refetch } = useOwnerOrders(restaurantId);
   const [filter, setFilter] = useState("all");
   const [selectedOrder, setSelectedOrder] = useState(null);
 
-  function load() {
-    requestJson("/restaurant_owner/orders")
-      .then((payload) => setOrders(payload.data.orders))
-      .catch((err) => setError(err.message));
-  }
-
-  useEffect(load, []);
-
-  async function markPaid(orderId) {
-    setOrders((current) =>
-      current.map((o) => o.id === orderId ? { ...o, paymentStatus: "paid" } : o),
-    );
-    setSelectedOrder((o) => o?.id === orderId ? { ...o, paymentStatus: "paid" } : o);
-    try {
-      await requestJson(`/restaurant_owner/orders/${orderId}/payment`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentStatus: "paid" }),
-      });
-    } catch {
-      load();
-    }
-  }
-
-  async function cancelOrder(order, reason = "") {
-    setOrders((current) =>
-      current.map((o) => (o.id === order.id ? { ...o, orderStatus: "cancelled" } : o)),
-    );
-    setSelectedOrder(null);
-    try {
-      await requestJson(`/restaurant_owner/orders/${order.id}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderStatus: "cancelled", cancellationReason: reason }),
-      });
-    } catch {
-      load();
-    }
-  }
+  // Owner view is READ-ONLY — status/payment changes handled by staff via chef/waiter APIs
+  function markPaid() {}
+  function cancelOrder() {}
 
   const counts = useMemo(() => {
     const list = orders ?? [];
@@ -308,10 +273,10 @@ export default function ManageOrders() {
     return list.filter((o) => o.orderStatus === filter);
   }, [orders, filter]);
 
-  if (error && !orders) {
+  if (isError) {
     return (
       <DashboardLayout>
-        <p className="text-muted-foreground">Failed to load: {error}</p>
+        <p className="text-muted-foreground">Failed to load orders.</p>
       </DashboardLayout>
     );
   }
@@ -332,7 +297,7 @@ export default function ManageOrders() {
             Monitor live orders and move them through the kitchen workflow.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={load} className="gap-1.5">
+        <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading} className="gap-1.5">
           <RefreshCw className="h-3.5 w-3.5" /> Refresh
         </Button>
       </div>
@@ -381,9 +346,9 @@ export default function ManageOrders() {
             </TableHeader>
             <TableBody>
               {visible.map((order) => (
-                <TableRow key={order.id}>
+                <TableRow key={order._id ?? order.id}>
                   <TableCell className="pl-6 font-semibold">
-                    #{order.id.slice(-6)}
+                    #{order._id ?? order.id.slice(-6)}
                   </TableCell>
                   <TableCell>{order.tableNumber}</TableCell>
                   <TableCell className="max-w-[260px] text-muted-foreground">

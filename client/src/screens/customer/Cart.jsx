@@ -6,7 +6,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Minus, Plus, ShoppingBag, Tag, Trash2 } from "lucide-react";
 
-import { requestJson } from "@/api";
+import { usePlaceOrder } from "@/hooks/customer/useCustomerOrders";
 import CustomerLayout, { FoodThumb, VegDot, formatPrice } from "./CustomerLayout";
 import { useCustomer } from "./CustomerApp";
 
@@ -19,11 +19,12 @@ const COUPONS = {
 export default function Cart() {
   const navigate = useNavigate();
   const { session, cart, cartTotal, setQuantity, removeFromCart, clearCart } = useCustomer();
+  const placeOrderMutation = usePlaceOrder();
   const [couponInput, setCouponInput] = useState("");
   const [coupon, setCoupon] = useState(null);
   const [couponError, setCouponError] = useState("");
-  const [placing, setPlacing] = useState(false);
   const [error, setError] = useState("");
+  const placing = placeOrderMutation.isPending;
 
   const discount = coupon ? COUPONS[coupon].apply(cartTotal) : 0;
   const taxes = Math.round((cartTotal - discount) * 0.05);
@@ -42,25 +43,24 @@ export default function Cart() {
 
   async function placeOrder() {
     if (placing || cart.length === 0) return;
-    setPlacing(true);
     setError("");
     try {
-      const payload = await requestJson("/customer/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mobile: session.mobile,
-          tableNumber: session.tableNumber,
-          orderType: session.orderType,
-          coupon,
-          items: cart,
-        }),
+      const { data } = await placeOrderMutation.mutateAsync({
+        restaurantId: session.restaurantId,
+        tableNumber: session.tableNumber,
+        orderType: session.orderType ?? "dine-in",
+        couponCode: coupon,
+        items: cart.map((line) => ({
+          menuItem: line.id,
+          quantity: line.quantity,
+          specialInstructions: line.instructions ?? "",
+        })),
       });
       clearCart();
-      navigate(`/order/confirmation/${payload.data.order.id}`, { replace: true });
+      const orderId = data.data?.order?._id ?? data.data?._id ?? data.data?.orderId;
+      navigate(`/order/confirmation/${orderId}`, { replace: true });
     } catch (err) {
-      setError(err.message);
-      setPlacing(false);
+      setError(err.response?.data?.message ?? err.message);
     }
   }
 

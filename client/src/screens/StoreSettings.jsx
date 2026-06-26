@@ -3,9 +3,12 @@
 // details with a sticky unsaved-changes action bar (PRD §13.1 OWN-01).
 
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { ChevronDown, ImagePlus, ImageUp, Plus } from "lucide-react";
 
-import { requestJson } from "@/api";
+import { useOwnerAuth } from "@/context/OwnerAuthContext";
+import { useSettings, useUpdateSettings, useUpdateHours, useUpdateDelivery } from "@/hooks/owner/useSettings";
+import { ownerApi } from "@/api/owner.api";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -82,44 +85,119 @@ function LegalEntitySelect({ value, onChange }) {
 }
 
 export default function StoreSettings() {
-  const [settings, setSettings] = useState(null);
-  const [original, setOriginal] = useState(null);
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [savedNote, setSavedNote] = useState("");
+  const navigate = useNavigate();
+  const { restaurantId, fetchRestaurants, user } = useOwnerAuth();
+  const { data: serverSettings, isLoading, isError } = useSettings(restaurantId);
+  const updateMutation        = useUpdateSettings(restaurantId);
+  const updateHoursMutation   = useUpdateHours(restaurantId);
+  const updateDeliveryMutation = useUpdateDelivery(restaurantId);
 
+  const [settings, setSettings]     = useState(null);
+  const [original, setOriginal]     = useState(null);
+  const [savedNote, setSavedNote]   = useState("");
+  // create-restaurant form (used when restaurantId is null)
+  const [creating, setCreating]     = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [newName, setNewName]       = useState("");
+  const [newAddress, setNewAddress] = useState("");
+
+  // Convert minutes-from-midnight number → "HH:MM" string for time inputs
+  const minsToTime = (mins) => {
+    if (mins == null) return "";
+    const h = String(Math.floor(mins / 60)).padStart(2, "0");
+    const m = String(mins % 60).padStart(2, "0");
+    return `${h}:${m}`;
+  };
+  const timeToMins = (t) => {
+    if (!t) return 0;
+    const [h, m] = t.split(":").map(Number);
+    return h * 60 + (m || 0);
+  };
+
+  const DAYS = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
+
+  // Seed form state from server restaurant document
   useEffect(() => {
-    requestJson("/restaurant_owner/store-settings")
-      .then((payload) => {
-        setSettings(payload.data);
-        setOriginal(JSON.stringify(payload.data));
-      })
-      .catch((err) => setError(err.message));
-  }, []);
+    if (!serverSettings || settings) return;
+    const r = serverSettings;
+    const hoursMap = Object.fromEntries((r.operatingHours ?? []).map((h) => [h.day, h]));
+    const seeded = {
+      name:         r.name ?? "",
+      description:  r.description ?? "",
+      cuisineType:  (r.cuisineTypes ?? [])[0] ?? "",
+      address:      r.address?.street ?? r.address?.city ?? "",
+      email:        "",
+      phone:        "",
+      website:      "",
+      establishedYear: "",
+      hours: DAYS.map((day) => ({
+        day:    day.charAt(0).toUpperCase() + day.slice(1),
+        dayKey: day,
+        closed: !(hoursMap[day]?.isOpen ?? true),
+        open:   minsToTime(hoursMap[day]?.openTime ?? 540),
+        close:  minsToTime(hoursMap[day]?.closeTime ?? 1320),
+      })),
+      delivery: {
+        radiusKm:       r.delivery?.radiusKm ?? 5,
+        baseCharge:     r.delivery?.baseCharge ?? 0,
+        freeThreshold:  r.delivery?.freeThreshold ?? "",
+        estimatedTime:  r.delivery?.estimatedMinutes ?? 30,
+      },
+      business: {
+        legalEntityType: r.settings?.legalEntityType ?? "",
+        ownerName:       "",
+        panNumber:       "",
+        gstNumber:       r.settings?.gstNumber ?? "",
+      },
+      licenses: { fssai: "", fssaiExpiry: "", tradeLicense: "", tradeLicenseExpiry: "" },
+    };
+    setSettings(seeded);
+    setOriginal(JSON.stringify(seeded));
+  }, [serverSettings]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (patch) => setSettings((s) => ({ ...s, ...patch }));
   const setNested = (key, patch) =>
     setSettings((s) => ({ ...s, [key]: { ...s[key], ...patch } }));
   const setHour = (i, patch) =>
-    setSettings((s) => ({ ...s, hours: s.hours.map((h, idx) => (idx === i ? { ...h, ...patch } : h)) }));
+    setSettings((s) => ({ ...s, hours: (s.hours ?? []).map((h, idx) => (idx === i ? { ...h, ...patch } : h)) }));
 
   const dirty = settings && original && JSON.stringify(settings) !== original;
+  const saving = updateMutation.isPending || updateHoursMutation.isPending || updateDeliveryMutation.isPending;
 
   async function save() {
-    setSaving(true);
     setSavedNote("");
     try {
-      await requestJson("/restaurant_owner/store-settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
+      // Main settings
+      await updateMutation.mutateAsync({
+        name:        settings.name,
+        description: settings.description,
+        cuisineTypes: settings.cuisineType ? [settings.cuisineType] : [],
+        address:     { street: settings.address },
+        settings: {
+          legalEntityType: settings.business?.legalEntityType,
+          gstNumber:       settings.business?.gstNumber,
+        },
+      });
+      // Operating hours
+      await updateHoursMutation.mutateAsync({
+        operatingHours: (settings.hours ?? []).map((h) => ({
+          day:       h.dayKey,
+          isOpen:    !h.closed,
+          openTime:  timeToMins(h.open),
+          closeTime: timeToMins(h.close),
+        })),
+      });
+      // Delivery
+      await updateDeliveryMutation.mutateAsync({
+        radiusKm:         Number(settings.delivery?.radiusKm) || 5,
+        baseCharge:       Number(settings.delivery?.baseCharge) || 0,
+        freeThreshold:    Number(settings.delivery?.freeThreshold) || undefined,
+        estimatedMinutes: Number(settings.delivery?.estimatedTime) || 30,
       });
       setOriginal(JSON.stringify(settings));
       setSavedNote("All changes saved");
     } catch (err) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
+      setSavedNote(err.response?.data?.message ?? "Save failed");
     }
   }
 
@@ -128,16 +206,79 @@ export default function StoreSettings() {
     setSavedNote("");
   }
 
-  if (error && !settings) {
+  // ── No restaurant yet: show create form ──────────────────────────
+  async function handleCreate(e) {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    setCreating(true);
+    setCreateError("");
+    try {
+      await ownerApi.createRestaurant({ name: newName.trim(), address: { full: newAddress.trim() } });
+      await fetchRestaurants();
+      navigate("/dashboard", { replace: true });
+    } catch (err) {
+      setCreateError(err.response?.data?.message ?? err.message ?? "Failed to create restaurant");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  if (!restaurantId) {
     return (
-      <DashboardLayout>
-        <p className="text-muted-foreground">Failed to load: {error}</p>
+      <DashboardLayout profile={user}>
+        <div className="flex flex-col items-center justify-center py-20">
+          <Card className="w-full max-w-md">
+            <CardHeader className="pb-4">
+              <h2 className="text-lg font-bold">Create Your Restaurant</h2>
+              <p className="text-sm text-muted-foreground">
+                Set up your restaurant profile to get started.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleCreate} className="space-y-4">
+                <Field label="Restaurant Name *">
+                  <Input
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="e.g. Saffron Kitchen"
+                    required
+                  />
+                </Field>
+                <Field label="Address">
+                  <Input
+                    value={newAddress}
+                    onChange={(e) => setNewAddress(e.target.value)}
+                    placeholder="123 Main St, City"
+                  />
+                </Field>
+                {createError && (
+                  <p className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-600">{createError}</p>
+                )}
+                <Button
+                  type="submit"
+                  disabled={creating || !newName.trim()}
+                  className="w-full bg-brand-gradient text-white hover:brightness-105"
+                >
+                  {creating ? "Creating…" : "Create Restaurant"}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
       </DashboardLayout>
     );
   }
-  if (!settings) {
+
+  if (isError) {
     return (
-      <DashboardLayout>
+      <DashboardLayout profile={user}>
+        <p className="text-muted-foreground">Failed to load store settings.</p>
+      </DashboardLayout>
+    );
+  }
+  if (isLoading || !settings) {
+    return (
+      <DashboardLayout profile={user}>
         <p className="text-muted-foreground">Loading store settings…</p>
       </DashboardLayout>
     );
@@ -232,7 +373,7 @@ export default function StoreSettings() {
               <span>Opening Time</span>
               <span>Closing Time</span>
             </div>
-            {settings.hours.map((h, i) => (
+            {(settings.hours ?? []).map((h, i) => (
               <div
                 key={h.day}
                 className={cn(

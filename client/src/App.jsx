@@ -9,12 +9,14 @@ import OwnerDashboard from "./screens/OwnerDashboard";
 import MenuManagement from "./screens/MenuManagement";
 import QrManagement from "./screens/QrManagement";
 import Offers from "./screens/Offers";
+import LiveMonitor from "./screens/LiveMonitor";
 import ManageOrders from "./screens/ManageOrders";
 import Cancellations from "./screens/Cancellations";
 import MenuItems from "./screens/MenuItems";
 import StoreSettings from "./screens/StoreSettings";
 import BillDetails from "./screens/BillDetails";
 import Profile from "./screens/Profile";
+import StaffManagement from "./screens/StaffManagement";
 import ChefDashboard from "./screens/ChefDashboard";
 import ManagerDashboard from "./screens/manager/ManagerDashboard";
 import ManagerLiveMonitoring from "./screens/manager/ManagerLiveMonitoring";
@@ -25,6 +27,10 @@ import CustomerApp from "./screens/customer/CustomerApp";
 import WaiterApp from "./screens/waiter/WaiterApp";
 import AdminApp from "./screens/admin/AdminApp";
 import PanelSwitcher from "./components/PanelSwitcher";
+import OwnerLoginPage from "./screens/auth/OwnerLoginPage";
+import StaffLoginPage from "./screens/auth/StaffLoginPage";
+import OwnerRoute from "./components/OwnerRoute";
+import StaffRoute from "./components/StaffRoute";
 
 const OWNER_STORAGE_KEY = "yulo_owner_session";
 const EMPLOYEE_STORAGE_KEY = "yulo_employee_session";
@@ -3449,56 +3455,75 @@ export default function App() {
     <>
       <PanelSwitcher />
       <Routes>
-      {/* New Figma screens render full-screen with the shared sidebar layout.
-          `/` is the landing page so `npm run dev` opens straight to the dashboard. */}
-      <Route path="/" element={<OwnerDashboard />} />
-      <Route path="/dashboard" element={<OwnerDashboard />} />
-      <Route path="/menu-management" element={<MenuManagement />} />
+        {/* ── Auth routes (public) ─────────────────────────────────────── */}
+        <Route path="/owner/login" element={<OwnerLoginPage />} />
+        <Route path="/staff/login" element={<StaffLoginPage />} />
 
-      {/* Owner panel screens. */}
-      <Route path="/qr" element={<QrManagement />} />
-      <Route path="/offers" element={<Offers />} />
-      <Route path="/orders" element={<ManageOrders />} />
-      <Route path="/bill" element={<BillDetails />} />
-      <Route path="/cancellations" element={<Cancellations />} />
-      <Route path="/menu-items" element={<MenuItems />} />
-      <Route path="/store-settings" element={<StoreSettings />} />
-      <Route path="/profile" element={<Profile />} />
+        {/* ── Owner portal (protected) ─────────────────────────────────── */}
+        <Route
+          path="/"
+          element={<OwnerRoute><OwnerDashboard /></OwnerRoute>}
+        />
+        <Route
+          path="/dashboard"
+          element={<OwnerRoute><OwnerDashboard /></OwnerRoute>}
+        />
+        <Route
+          path="/menu-management"
+          element={<OwnerRoute><MenuManagement /></OwnerRoute>}
+        />
+        <Route path="/qr" element={<OwnerRoute><QrManagement /></OwnerRoute>} />
+        <Route path="/offers" element={<OwnerRoute><Offers /></OwnerRoute>} />
+        <Route path="/orders" element={<OwnerRoute><ManageOrders /></OwnerRoute>} />
+        <Route path="/bill" element={<OwnerRoute><BillDetails /></OwnerRoute>} />
+        <Route path="/cancellations" element={<OwnerRoute><Cancellations /></OwnerRoute>} />
+        <Route path="/menu-items" element={<OwnerRoute><MenuItems /></OwnerRoute>} />
+        <Route path="/live-monitor" element={<OwnerRoute><LiveMonitor /></OwnerRoute>} />
+        <Route path="/store-settings" element={<OwnerRoute><StoreSettings /></OwnerRoute>} />
+        <Route path="/staff" element={<OwnerRoute><StaffManagement /></OwnerRoute>} />
+        <Route path="/profile" element={<OwnerRoute><Profile /></OwnerRoute>} />
 
-      {/* Customer QR ordering app — mobile-first, its own nested routes. */}
-      <Route path="/order/*" element={<CustomerApp />} />
+        {/* ── Customer QR ordering app (public — OTP guards internally) ── */}
+        <Route path="/order/*" element={<CustomerApp />} />
 
-      {/* Staff portals — distinct layouts (kitchen display / light sidebar). */}
-      <Route path="/chef" element={<ChefDashboard />} />
-      <Route path="/waiter/*" element={<WaiterApp />} />
+        {/* ── Staff portals (protected by role) ────────────────────────── */}
+        <Route
+          path="/chef"
+          element={<StaffRoute role="chef"><ChefDashboard /></StaffRoute>}
+        />
+        <Route
+          path="/waiter/*"
+          element={<StaffRoute role="waiter"><WaiterApp /></StaffRoute>}
+        />
 
-      {/* Manager portal — unique screens (shares the dark sidebar chrome). */}
-      <Route path="/manager" element={<ManagerDashboard />} />
-      <Route path="/manager/dashboard" element={<ManagerDashboard />} />
-      <Route path="/manager/orders" element={<ManagerOrders />} />
-      <Route path="/manager/live" element={<ManagerLiveMonitoring />} />
-      <Route path="/manager/requests" element={<ManagerRequests />} />
-      <Route path="/manager/tables" element={<ManagerTables />} />
+        {/* ── Manager portal ────────────────────────────────────────────── */}
+        <Route path="/manager" element={<ManagerDashboard />} />
+        <Route path="/manager/dashboard" element={<ManagerDashboard />} />
+        <Route path="/manager/orders" element={<ManagerOrders />} />
+        <Route path="/manager/live" element={<ManagerLiveMonitoring />} />
+        <Route path="/manager/requests" element={<ManagerRequests />} />
+        <Route path="/manager/tables" element={<ManagerTables />} />
 
-      {/* Platform Admin portal — its own platform sidebar + nested routes. */}
-      <Route path="/admin/*" element={<AdminApp />} />
+        {/* ── Platform Admin portal ─────────────────────────────────────── */}
+        <Route path="/admin/*" element={<AdminApp />} />
 
-      {/* Legacy debug UI keeps the old top-nav shell. */}
-      <Route
-        path="*"
-        element={
-          <AppShell>
-            <Routes>
-              <Route path="/" element={<HomePage />} />
-              <Route path="/owner" element={<OwnerPortalPage />} />
-              <Route path="/chef" element={<ChefPortalPage />} />
-              <Route path="/waiter" element={<WaiterPortalPage />} />
-              <Route path="/menu" element={<CustomerMenuPage />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </AppShell>
-        }
-      />
+        {/* ── Legacy debug portals (kept for reference, behind /legacy/*) ── */}
+        <Route
+          path="/legacy/*"
+          element={
+            <AppShell>
+              <Routes>
+                <Route path="/" element={<HomePage />} />
+                <Route path="/owner" element={<OwnerPortalPage />} />
+                <Route path="/chef" element={<ChefPortalPage />} />
+                <Route path="/waiter" element={<WaiterPortalPage />} />
+                <Route path="/menu" element={<CustomerMenuPage />} />
+              </Routes>
+            </AppShell>
+          }
+        />
+
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
   );
