@@ -1,6 +1,7 @@
 import Order from "../../models/orders.js";
 import Restaurant from "../../models/restaurant.js";
 import logger from "../../utils/logger.js";
+import { resolveCallerRestaurantId } from "../../utils/authScope.js";
 
 function normalizeRequestedItems(items) {
   const quantityByRecipeId = new Map();
@@ -13,13 +14,18 @@ function normalizeRequestedItems(items) {
       return null;
     }
 
-    quantityByRecipeId.set(recipeId, (quantityByRecipeId.get(recipeId) ?? 0) + quantity);
+    quantityByRecipeId.set(
+      recipeId,
+      (quantityByRecipeId.get(recipeId) ?? 0) + quantity,
+    );
   }
 
-  return Array.from(quantityByRecipeId.entries()).map(([recipeId, quantity]) => ({
-    recipeId,
-    quantity,
-  }));
+  return Array.from(quantityByRecipeId.entries()).map(
+    ([recipeId, quantity]) => ({
+      recipeId,
+      quantity,
+    }),
+  );
 }
 
 async function createOrder(request, reply) {
@@ -99,6 +105,7 @@ async function createOrder(request, reply) {
       restaurant_id: restaurant._id,
       tableNumber,
       paymentStatus: "pending",
+      orderStatus: "new",
     });
 
     logger.info(
@@ -126,6 +133,7 @@ async function createOrder(request, reply) {
           restaurant_id: order.restaurant_id,
           tableNumber: order.tableNumber,
           paymentStatus: order.paymentStatus,
+          orderStatus: order.orderStatus,
           time: order.time,
         },
       },
@@ -142,12 +150,13 @@ async function createOrder(request, reply) {
 
 async function getOrdersByRestaurant(request, reply) {
   try {
-    const restaurantId = request.query.restaurant_id?.toString?.().trim();
+    // Scope to the caller's own restaurant, taken from the verified token.
+    const restaurantId = await resolveCallerRestaurantId(request);
 
     if (!restaurantId) {
-      return reply.code(400).send({
+      return reply.code(404).send({
         status: "error",
-        message: "restaurant_id query parameter is required",
+        message: "No restaurant is associated with this account",
       });
     }
 
@@ -185,6 +194,7 @@ async function getOrdersByRestaurant(request, reply) {
           restaurant_id: order.restaurant_id,
           tableNumber: order.tableNumber,
           paymentStatus: order.paymentStatus,
+          orderStatus: order.orderStatus,
           time: order.time,
         })),
       },
@@ -199,4 +209,178 @@ async function getOrdersByRestaurant(request, reply) {
   }
 }
 
-export { createOrder, getOrdersByRestaurant };
+async function updateOrderPaymentStatus(request, reply) {
+  try {
+    const orderId = request.params.orderId?.toString?.().trim();
+    const reqBody = request.body ?? {};
+    const paymentStatus = reqBody.paymentStatus?.toString?.().trim();
+    const restaurantId = await resolveCallerRestaurantId(request);
+
+    if (!orderId || !paymentStatus) {
+      return reply.code(400).send({
+        status: "error",
+        message: "orderId and paymentStatus are required",
+      });
+    }
+
+    if (!restaurantId) {
+      return reply.code(404).send({
+        status: "error",
+        message: "No restaurant is associated with this account",
+      });
+    }
+
+    if (paymentStatus !== "paid") {
+      return reply.code(400).send({
+        status: "error",
+        message: "Only paid status updates are supported",
+      });
+    }
+
+    const order = await Order.findById(orderId);
+
+    if (!order) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Order not found",
+      });
+    }
+
+    if (order.restaurant_id.toString() !== restaurantId) {
+      return reply.code(403).send({
+        status: "error",
+        message: "This order does not belong to the provided restaurant",
+      });
+    }
+
+    if (order.paymentStatus === "paid") {
+      return reply.send({
+        status: "success",
+        message: "Order is already marked as paid",
+        data: {
+          order: {
+            id: order._id,
+            paymentStatus: order.paymentStatus,
+          },
+        },
+      });
+    }
+
+    order.paymentStatus = "paid";
+    await order.save();
+
+    logger.info(`Order marked as paid: ${order._id}`);
+
+    return reply.send({
+      status: "success",
+      message: "Order marked as paid successfully",
+      data: {
+        order: {
+          id: order._id,
+          paymentStatus: order.paymentStatus,
+        },
+      },
+    });
+  } catch (error) {
+    logger.error(`Unable to update order payment status: ${error.message}`);
+
+    return reply.code(500).send({
+      status: "error",
+      message: "Unable to update order payment status",
+    });
+  }
+}
+
+async function generateOrderBill(request, reply) {
+  try {
+    const orderId = request.params.orderId?.toString?.().trim();
+    const restaurantId = await resolveCallerRestaurantId(request);
+
+    if (!orderId) {
+      return reply.code(400).send({
+        status: "error",
+        message: "orderId is required",
+      });
+    }
+
+    if (!restaurantId) {
+      return reply.code(404).send({
+        status: "error",
+        message: "No restaurant is associated with this account",
+      });
+    }
+
+    const [order, restaurant] = await Promise.all([
+      Order.findById(orderId).lean(),
+      Restaurant.findById(restaurantId).lean(),
+    ]);
+
+    if (!order) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Order not found",
+      });
+    }
+
+    if (!restaurant) {
+      return reply.code(404).send({
+        status: "error",
+        message: "Restaurant not found",
+      });
+    }
+
+    if (order.restaurant_id.toString() !== restaurantId) {
+      return reply.code(403).send({
+        status: "error",
+        message: "This order does not belong to the provided restaurant",
+      });
+    }
+
+    const billItems = (order.items ?? []).map((item) => ({
+      recipeId: item.recipe_id,
+      title: item.title,
+      quantity: item.quantity,
+      price: item.price,
+      lineTotal: item.quantity * item.price,
+    }));
+
+    return reply.send({
+      status: "success",
+      message: "Bill generated successfully",
+      data: {
+        bill: {
+          billNumber: `BILL-${order._id.toString().slice(-6).toUpperCase()}`,
+          generatedAt: new Date(),
+          restaurant: {
+            id: restaurant._id,
+            name: restaurant.name,
+          },
+          order: {
+            id: order._id,
+            tableNumber: order.tableNumber,
+            paymentStatus: order.paymentStatus,
+            orderStatus: order.orderStatus,
+            time: order.time,
+          },
+          items: billItems,
+          subtotal: order.totalPrice,
+          total: order.totalPrice,
+        },
+      },
+    });
+  } catch (error) {
+    logger.error(`Unable to generate order bill: ${error.message}`);
+
+    return reply.code(500).send({
+      status: "error",
+      message: "Unable to generate bill",
+    });
+  }
+}
+
+export {
+  createOrder,
+  generateOrderBill,
+  getOrdersByRestaurant,
+  updateOrderPaymentStatus,
+};

@@ -1,19 +1,19 @@
-import logger from '../../utils/logger.js';
+import logger from "../../utils/logger.js";
 
 async function serverHealth() {
   try {
-    logger.info('Health check requested');
+    logger.info("Health check requested");
 
     return {
-      status: 'ok',
-      message: 'Server is working fine',
+      status: "ok",
+      message: "Server is working fine",
     };
   } catch (error) {
-    logger.error('Health check failed', error);
+    logger.error("Health check failed", error);
 
     return {
-      status: 'error',
-      message: 'Server is down',
+      status: "error",
+      message: "Server is down",
     };
   }
 }

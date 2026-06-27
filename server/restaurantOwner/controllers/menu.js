@@ -6,43 +6,71 @@ import logger from "../../utils/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const clientDir = path.resolve(__dirname, "../../../client/qrClient");
+const clientDistDir = path.resolve(__dirname, "../../../client/dist");
+const clientEntryFile = path.join(clientDistDir, "index.html");
 
-async function serveMenuHtml(_request, reply) {
+function getContentType(filePath) {
+  const extension = path.extname(filePath);
+
+  if (extension === ".js") {
+    return "application/javascript; charset=utf-8";
+  }
+
+  if (extension === ".css") {
+    return "text/css; charset=utf-8";
+  }
+
+  if (extension === ".svg") {
+    return "image/svg+xml";
+  }
+
+  if (extension === ".png") {
+    return "image/png";
+  }
+
+  if (extension === ".jpg" || extension === ".jpeg") {
+    return "image/jpeg";
+  }
+
+  if (extension === ".json") {
+    return "application/json; charset=utf-8";
+  }
+
+  return "text/plain; charset=utf-8";
+}
+
+async function serveClientApp(_request, reply) {
   try {
-    const html = await readFile(path.join(clientDir, "index.html"), "utf-8");
+    const html = await readFile(clientEntryFile, "utf-8");
 
     return reply.type("text/html; charset=utf-8").send(html);
   } catch (error) {
-    logger.error(`Unable to serve menu HTML: ${error.message}`);
-
-    return reply.code(500).send("Unable to load menu page");
-  }
-}
-
-async function serveMenuCss(_request, reply) {
-  try {
-    const css = await readFile(path.join(clientDir, "index.css"), "utf-8");
-
-    return reply.type("text/css; charset=utf-8").send(css);
-  } catch (error) {
-    logger.error(`Unable to serve menu CSS: ${error.message}`);
-
-    return reply.code(500).send("Unable to load menu styles");
-  }
-}
-
-async function serveMenuJs(_request, reply) {
-  try {
-    const js = await readFile(path.join(clientDir, "index.js"), "utf-8");
+    logger.error(`Unable to serve client application: ${error.message}`);
 
     return reply
-      .type("application/javascript; charset=utf-8")
-      .send(js);
-  } catch (error) {
-    logger.error(`Unable to serve menu JS: ${error.message}`);
+      .code(500)
+      .send(
+        "Client build not found. Run the Vite build before serving from the API.",
+      );
+  }
+}
 
-    return reply.code(500).send("Unable to load menu script");
+async function serveClientAsset(request, reply) {
+  try {
+    const assetPath = request.params["*"]?.toString?.() ?? "";
+    const resolvedPath = path.resolve(clientDistDir, "assets", assetPath);
+
+    if (!resolvedPath.startsWith(clientDistDir)) {
+      return reply.code(400).send("Invalid asset path");
+    }
+
+    const file = await readFile(resolvedPath);
+
+    return reply.type(getContentType(resolvedPath)).send(file);
+  } catch (error) {
+    logger.error(`Unable to serve client asset: ${error.message}`);
+
+    return reply.code(404).send("Asset not found");
   }
 }
 
@@ -92,4 +120,4 @@ async function getRestaurantMenu(request, reply) {
   }
 }
 
-export { getRestaurantMenu, serveMenuCss, serveMenuHtml, serveMenuJs };
+export { getRestaurantMenu, serveClientApp, serveClientAsset };

@@ -110,7 +110,9 @@ function setError(message) {
 }
 
 function getRecipes() {
-  return Array.isArray(currentRestaurant?.recipies) ? currentRestaurant.recipies : [];
+  return Array.isArray(currentRestaurant?.recipies)
+    ? currentRestaurant.recipies
+    : [];
 }
 
 function getSelectedItems() {
@@ -169,7 +171,9 @@ function updateQuantity(recipeId, nextQuantity) {
   }
 
   const recipe = getRecipes().find((item) => item.id === recipeId);
-  const quantityValueEl = document.querySelector(`[data-quantity-for="${recipeId}"]`);
+  const quantityValueEl = document.querySelector(
+    `[data-quantity-for="${recipeId}"]`,
+  );
 
   if (quantityValueEl) {
     quantityValueEl.textContent = selectedQuantities.get(recipeId) ?? 0;
@@ -317,8 +321,14 @@ async function loadMenu() {
     const response = await fetch(`/api/restaurants/${restaurantId}/menu`);
     const payload = await response.json();
 
-    if (!response.ok || payload?.status !== "success" || !payload?.data?.restaurant) {
-      throw new Error(payload?.message || "Restaurant menu could not be loaded.");
+    if (
+      !response.ok ||
+      payload?.status !== "success" ||
+      !payload?.data?.restaurant
+    ) {
+      throw new Error(
+        payload?.message || "Restaurant menu could not be loaded.",
+      );
     }
 
     renderRestaurant(payload.data.restaurant);

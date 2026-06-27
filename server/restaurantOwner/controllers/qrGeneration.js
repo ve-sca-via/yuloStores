@@ -1,7 +1,6 @@
 import logger from "../../utils/logger.js";
 import Restaurant from "../../models/restaurant.js";
 import RestaurantOwner from "../../models/restaurantOwner.js";
-import { getLoggedInOwnerId } from "../../utils/restaurantOwnerSession.js";
 
 function getBaseUrl(request, inputBaseUrl) {
   const baseUrl = inputBaseUrl?.trim?.() || process.env.CUSTOMER_APP_URL;
@@ -20,13 +19,10 @@ function getBaseUrl(request, inputBaseUrl) {
 async function generateQr(request, reply) {
   try {
     const reqBody = request.body ?? {};
-    const ownerId =
-      reqBody.ownerId?.trim?.() ??
-      reqBody.ownerId ??
-      (await getLoggedInOwnerId());
+    const ownerId = request.ownerId;
     const tableNumber = reqBody.tableNumber?.toString?.().trim();
 
-    if (!ownerId || !tableNumber) {
+    if (!tableNumber) {
       logger.warn("QR generation failed: missing ownerId or table number");
 
       return reply.code(400).send({
@@ -68,6 +64,15 @@ async function generateQr(request, reply) {
         status: "error",
         message: "Restaurant not found",
       });
+    }
+
+    const registeredTables = Array.isArray(restaurant.validTables)
+      ? restaurant.validTables
+      : [];
+
+    if (!registeredTables.includes(tableNumber)) {
+      restaurant.validTables = [...registeredTables, tableNumber];
+      await restaurant.save();
     }
 
     const menuUrl = new URL("/menu", getBaseUrl(request, reqBody.baseUrl));
