@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CheckCircle2, ChefHat, Eye, LogOut, MoreHorizontal, X } from "lucide-react";
+import { CheckCircle2, ChefHat, Eye, LogOut, X } from "lucide-react";
 
 import { useStaffAuth } from "@/context/StaffAuthContext";
 import { useKitchenQueue, useKitchenBoard, useUpdateOrderStatus } from "@/hooks/staff/useKitchen";
@@ -293,31 +293,9 @@ function BoardCard({ order, column, onAction, onViewDetails }) {
       )}
 
       {column === "ready" && (
-        <div className="space-y-2">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => act("delivered")}
-            className="w-full rounded-xl bg-[#1C1C1E] py-2.5 text-sm font-bold text-white transition hover:bg-black disabled:opacity-60"
-          >
-            {busy ? "Updating…" : "Mark Completed"}
-          </button>
-          <div className="flex items-center justify-between">
-            <button type="button" onClick={() => onViewDetails(order)} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-[#24190f]">
-              <Eye className="h-3.5 w-3.5" /> View Details
-            </button>
-            <button type="button" className="text-muted-foreground hover:text-[#24190f]">
-              <MoreHorizontal className="h-4 w-4" />
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={() => act("preparing")}
-            className="w-full rounded-xl border border-brand-cream py-2 text-sm font-medium text-[#5a403e] hover:bg-brand-cream/20"
-          >
-            Mark incomplete
-          </button>
-        </div>
+        <button type="button" onClick={() => onViewDetails(order)} className="flex w-full items-center justify-center gap-1.5 py-1 text-sm text-muted-foreground hover:text-[#24190f]">
+          <Eye className="h-3.5 w-3.5" /> View Details
+        </button>
       )}
 
       {column === "done" && (

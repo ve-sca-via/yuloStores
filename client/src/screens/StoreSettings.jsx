@@ -2,7 +2,7 @@
 // brand assets, weekly opening hours, delivery logistics, and legal/licensing
 // details with a sticky unsaved-changes action bar (PRD §13.1 OWN-01).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, ImagePlus, ImageUp, Plus } from "lucide-react";
 
@@ -46,9 +46,22 @@ function Field({ label, children }) {
 
 function LegalEntitySelect({ value, onChange }) {
   const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
   const display = value || "Select type";
+
+  useEffect(() => {
+    if (!open) return;
+    function handleOutsideClick(e) {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, [open]);
+
   return (
-    <div className="relative">
+    <div className="relative" ref={containerRef}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -72,12 +85,6 @@ function LegalEntitySelect({ value, onChange }) {
               {type}
             </button>
           ))}
-          <button
-            type="button"
-            className="flex w-full items-center gap-1.5 border-t border-brand-cream/60 px-4 py-2.5 text-sm text-muted-foreground hover:bg-brand-cream/20"
-          >
-            <Plus className="h-3.5 w-3.5" /> Add Legal entity type
-          </button>
         </div>
       )}
     </div>
@@ -95,6 +102,7 @@ export default function StoreSettings() {
   const [settings, setSettings]     = useState(null);
   const [original, setOriginal]     = useState(null);
   const [savedNote, setSavedNote]   = useState("");
+  const seededRef                   = useRef(false);
   // create-restaurant form (used when restaurantId is null)
   const [creating, setCreating]     = useState(false);
   const [createError, setCreateError] = useState("");
@@ -116,9 +124,10 @@ export default function StoreSettings() {
 
   const DAYS = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
 
-  // Seed form state from server restaurant document
+  // Seed form state from server restaurant document — runs once on first successful load
   useEffect(() => {
-    if (!serverSettings || settings) return;
+    if (!serverSettings || seededRef.current) return;
+    seededRef.current = true;
     const r = serverSettings;
     const hoursMap = Object.fromEntries((r.operatingHours ?? []).map((h) => [h.day, h]));
     const seeded = {
@@ -145,15 +154,24 @@ export default function StoreSettings() {
       },
       business: {
         legalEntityType: r.settings?.legalEntityType ?? "",
-        ownerName:       "",
-        panNumber:       "",
+        ownerName:       r.settings?.ownerName ?? "",
+        panNumber:       r.settings?.panNumber ?? "",
         gstNumber:       r.settings?.gstNumber ?? "",
       },
-      licenses: { fssai: "", fssaiExpiry: "", tradeLicense: "", tradeLicenseExpiry: "" },
+      licenses: {
+        fssai:              r.settings?.healthPermitId ?? "",
+        fssaiExpiry:        r.settings?.licenseExpiry
+                              ? new Date(r.settings.licenseExpiry).toISOString().split("T")[0]
+                              : "",
+        tradeLicense:       r.settings?.registrationNo ?? "",
+        tradeLicenseExpiry: r.settings?.tradeLicenseExpiry
+                              ? new Date(r.settings.tradeLicenseExpiry).toISOString().split("T")[0]
+                              : "",
+      },
     };
     setSettings(seeded);
     setOriginal(JSON.stringify(seeded));
-  }, [serverSettings]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [serverSettings]);
 
   const set = (patch) => setSettings((s) => ({ ...s, ...patch }));
   const setNested = (key, patch) =>
@@ -174,8 +192,14 @@ export default function StoreSettings() {
         cuisineTypes: settings.cuisineType ? [settings.cuisineType] : [],
         address:     { street: settings.address },
         settings: {
-          legalEntityType: settings.business?.legalEntityType,
-          gstNumber:       settings.business?.gstNumber,
+          legalEntityType:    settings.business?.legalEntityType      || undefined,
+          ownerName:          settings.business?.ownerName            || undefined,
+          panNumber:          settings.business?.panNumber            || undefined,
+          gstNumber:          settings.business?.gstNumber            || undefined,
+          healthPermitId:     settings.licenses?.fssai                || undefined,
+          licenseExpiry:      settings.licenses?.fssaiExpiry          || undefined,
+          registrationNo:     settings.licenses?.tradeLicense         || undefined,
+          tradeLicenseExpiry: settings.licenses?.tradeLicenseExpiry   || undefined,
         },
       });
       // Operating hours
@@ -440,85 +464,142 @@ export default function StoreSettings() {
           </CardContent>
         </Card>
 
-        {/* Business details + licenses */}
-        <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
-          <Card>
-            <CardHeader className="pb-4">
-              <h2 className="text-base font-bold">Business Details</h2>
-            </CardHeader>
-            <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Legal Entity Type">
-                <LegalEntitySelect
-                  value={settings.business?.legalEntityType ?? ""}
-                  onChange={(v) => setNested("business", { legalEntityType: v })}
-                />
-              </Field>
-              <Field label="Owner Name">
-                <Input
-                  value={settings.business?.ownerName ?? ""}
-                  onChange={(e) => setNested("business", { ownerName: e.target.value })}
-                  placeholder="Full name"
-                />
-              </Field>
-              <div className="sm:col-span-2">
-                <Field label="Tax Identifier (PAN)">
-                  <Input
-                    value={settings.business?.panNumber ?? ""}
-                    onChange={(e) => setNested("business", { panNumber: e.target.value })}
-                    placeholder="ABCDE1234F"
-                    className="uppercase tracking-widest"
-                  />
-                </Field>
-              </div>
-            </CardContent>
-          </Card>
+        {/* Business details + licenses — editable only until first save; locked thereafter */}
+        {(() => {
+          const s = serverSettings?.settings ?? {};
+          const businessSaved = !!(s.legalEntityType || s.ownerName || s.panNumber);
+          const licenseSaved  = !!(s.gstNumber || s.healthPermitId || s.registrationNo);
 
-          <Card>
-            <CardHeader className="pb-4">
-              <h2 className="text-base font-bold">Licenses &amp; Tax</h2>
-            </CardHeader>
-            <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <Field label="GST Number">
-                  <Input
-                    value={settings.business?.gstNumber ?? ""}
-                    onChange={(e) => setNested("business", { gstNumber: e.target.value })}
-                    placeholder="27AACR1234F1Z1"
-                    className="uppercase tracking-widest"
-                  />
-                </Field>
+          function LockedField({ label, value }) {
+            return (
+              <div className="space-y-1.5">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+                <p className={cn(
+                  "flex h-9 items-center rounded-md border border-gray-200 bg-gray-50 px-3 text-sm",
+                  value ? "font-medium text-gray-600" : "text-gray-400",
+                )}>
+                  {value || "—"}
+                </p>
               </div>
-              <Field label="FSSAI">
-                <Input
-                  value={settings.licenses?.fssai ?? ""}
-                  onChange={(e) => setNested("licenses", { fssai: e.target.value })}
-                  placeholder="H-992-B"
-                />
-              </Field>
-              <Field label="FSSAI License Expiry">
-                <Input
-                  type="date"
-                  value={settings.licenses?.fssaiExpiry ?? ""}
-                  onChange={(e) => setNested("licenses", { fssaiExpiry: e.target.value })}
-                />
-              </Field>
-              <Field label="Trade License">
-                <Input
-                  value={settings.licenses?.tradeLicense ?? ""}
-                  onChange={(e) => setNested("licenses", { tradeLicense: e.target.value })}
-                  placeholder="REG-9912002"
-                />
-              </Field>
-              <Field label="Trade License Expiry">
-                <Input
-                  type="date"
-                  value={settings.licenses?.tradeLicenseExpiry ?? ""}
-                  onChange={(e) => setNested("licenses", { tradeLicenseExpiry: e.target.value })}
-                />
-              </Field>
-            </CardContent>
-          </Card>
-        </div>
+            );
+          }
+
+          function LockBadge() {
+            return (
+              <span className="flex items-center gap-1 rounded-full border border-gray-200 bg-gray-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                <svg className="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                Locked
+              </span>
+            );
+          }
+
+          return (
+            <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
+              {/* Business Details */}
+              <Card>
+                <CardHeader className="flex-row items-center justify-between space-y-0 pb-4">
+                  <h2 className="text-base font-bold">Business Details</h2>
+                  {businessSaved && <LockBadge />}
+                </CardHeader>
+                {businessSaved ? (
+                  <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <LockedField label="Legal Entity Type" value={settings.business?.legalEntityType} />
+                    <LockedField label="Owner Name"        value={settings.business?.ownerName} />
+                    <div className="sm:col-span-2">
+                      <LockedField label="Tax Identifier (PAN)" value={settings.business?.panNumber} />
+                    </div>
+                  </CardContent>
+                ) : (
+                  <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <Field label="Legal Entity Type">
+                      <LegalEntitySelect
+                        value={settings.business?.legalEntityType ?? ""}
+                        onChange={(v) => setNested("business", { legalEntityType: v })}
+                      />
+                    </Field>
+                    <Field label="Owner Name">
+                      <Input
+                        value={settings.business?.ownerName ?? ""}
+                        onChange={(e) => setNested("business", { ownerName: e.target.value })}
+                        placeholder="Full name"
+                      />
+                    </Field>
+                    <div className="sm:col-span-2">
+                      <Field label="Tax Identifier (PAN)">
+                        <Input
+                          value={settings.business?.panNumber ?? ""}
+                          onChange={(e) => setNested("business", { panNumber: e.target.value })}
+                          placeholder="ABCDE1234F"
+                          className="uppercase tracking-widest"
+                        />
+                      </Field>
+                    </div>
+                  </CardContent>
+                )}
+              </Card>
+
+              {/* Licenses & Tax */}
+              <Card>
+                <CardHeader className="flex-row items-center justify-between space-y-0 pb-4">
+                  <h2 className="text-base font-bold">Licenses &amp; Tax</h2>
+                  {licenseSaved && <LockBadge />}
+                </CardHeader>
+                {licenseSaved ? (
+                  <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="sm:col-span-2">
+                      <LockedField label="GST Number" value={settings.business?.gstNumber} />
+                    </div>
+                    <LockedField label="FSSAI License No."  value={settings.licenses?.fssai} />
+                    <LockedField label="FSSAI Expiry Date"  value={settings.licenses?.fssaiExpiry} />
+                    <LockedField label="Trade License No."  value={settings.licenses?.tradeLicense} />
+                    <LockedField label="Trade License Expiry" value={settings.licenses?.tradeLicenseExpiry} />
+                  </CardContent>
+                ) : (
+                  <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="sm:col-span-2">
+                      <Field label="GST Number">
+                        <Input
+                          value={settings.business?.gstNumber ?? ""}
+                          onChange={(e) => setNested("business", { gstNumber: e.target.value })}
+                          placeholder="27AACR1234F1Z1"
+                          className="uppercase tracking-widest"
+                        />
+                      </Field>
+                    </div>
+                    <Field label="FSSAI License No.">
+                      <Input
+                        value={settings.licenses?.fssai ?? ""}
+                        onChange={(e) => setNested("licenses", { fssai: e.target.value })}
+                        placeholder="H-992-B"
+                      />
+                    </Field>
+                    <Field label="FSSAI Expiry Date">
+                      <Input
+                        type="date"
+                        value={settings.licenses?.fssaiExpiry ?? ""}
+                        onChange={(e) => setNested("licenses", { fssaiExpiry: e.target.value })}
+                      />
+                    </Field>
+                    <Field label="Trade License No.">
+                      <Input
+                        value={settings.licenses?.tradeLicense ?? ""}
+                        onChange={(e) => setNested("licenses", { tradeLicense: e.target.value })}
+                        placeholder="REG-9912002"
+                      />
+                    </Field>
+                    <Field label="Trade License Expiry">
+                      <Input
+                        type="date"
+                        value={settings.licenses?.tradeLicenseExpiry ?? ""}
+                        onChange={(e) => setNested("licenses", { tradeLicenseExpiry: e.target.value })}
+                      />
+                    </Field>
+                  </CardContent>
+                )}
+              </Card>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Sticky action bar */}

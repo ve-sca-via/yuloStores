@@ -126,6 +126,7 @@ export default function Offers() {
   const publishMutation = usePublishDiscount(restaurantId);
 
   const [form, setForm]               = useState(EMPTY);
+  const [drafts, setDrafts]           = useState([]);
   const [search, setSearch]           = useState("");
   const [error, setError]             = useState("");
   const [editingOffer, setEditingOffer] = useState(null);
@@ -158,6 +159,35 @@ export default function Offers() {
         : [];
     }
     return payload;
+  }
+
+  function saveDraft() {
+    if (!form.name.trim()) { setError("Add an offer name before saving a draft"); return; }
+    setError("");
+    setDrafts((d) => [...d, { ...form, _draftId: Date.now() }]);
+    setForm(EMPTY);
+  }
+
+  function loadDraft(draft) {
+    setForm({ ...draft });
+    setDrafts((d) => d.filter((x) => x._draftId !== draft._draftId));
+  }
+
+  function deleteDraft(draftId) {
+    setDrafts((d) => d.filter((x) => x._draftId !== draftId));
+  }
+
+  async function publishDraft(draft) {
+    if (!draft.validFrom || !draft.validTo) {
+      setDrafts((d) => d.map((x) => x._draftId === draft._draftId ? { ...x, _error: "Add start/end dates before publishing" } : x));
+      return;
+    }
+    try {
+      await createMutation.mutateAsync(toPayload(draft));
+      deleteDraft(draft._draftId);
+    } catch (err) {
+      setDrafts((d) => d.map((x) => x._draftId === draft._draftId ? { ...x, _error: err.response?.data?.message ?? err.message } : x));
+    }
   }
 
   async function publish() {
@@ -592,6 +622,7 @@ export default function Offers() {
                 </Button>
                 <Button
                   variant="outline"
+                  onClick={saveDraft}
                   className="border-[#EFE7DD] bg-white text-[#24190F] hover:bg-white hover:text-[#24190F] focus-visible:ring-0"
                 >
                   Save Draft
@@ -614,7 +645,8 @@ export default function Offers() {
             <CardHeader className="pb-3">
               <h2 className="text-base font-bold">Live Preview</h2>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-5">
+              {/* Real-time form preview */}
               <div className="overflow-hidden rounded-2xl border border-dashed border-brand-orange/50">
                 <div className="grid h-32 place-items-center bg-gradient-to-br from-brand-saffron to-brand-red text-white">
                   <ImagePlus className="h-7 w-7 opacity-80" />
@@ -636,10 +668,75 @@ export default function Offers() {
                   </div>
                 </div>
               </div>
-              <p className="mt-3 text-center text-xs text-muted-foreground">
+              <p className="text-center text-xs text-muted-foreground">
                 {discountLabel({ discountType: form.discountType, discountValue: form.discountValue || 0 })} ·{" "}
                 {APPLICABLE.find((a) => a.value === form.applicableFor)?.label}
               </p>
+
+              {/* Saved drafts */}
+              {drafts.length > 0 ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <div className="h-px flex-1 bg-brand-cream/70" />
+                    <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                      Saved Drafts ({drafts.length})
+                    </span>
+                    <div className="h-px flex-1 bg-brand-cream/70" />
+                  </div>
+                  {drafts.map((draft) => (
+                    <div
+                      key={draft._draftId}
+                      className="overflow-hidden rounded-xl border border-brand-cream bg-white"
+                    >
+                      <div className="flex items-start justify-between gap-2 px-3.5 pt-3.5">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-bold text-[#24190f]">{draft.name}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {discountLabel({ discountType: draft.discountType, discountValue: draft.discountValue || 0 })}
+                            {draft.type === "coupon" && draft.code ? (
+                              <span className="ml-2 font-mono font-semibold text-brand-orange">{draft.code}</span>
+                            ) : null}
+                          </p>
+                        </div>
+                        <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600">
+                          Draft
+                        </span>
+                      </div>
+                      {draft._error ? (
+                        <p className="px-3.5 pb-1 pt-1 text-xs text-red-500">{draft._error}</p>
+                      ) : null}
+                      <div className="mt-3 grid grid-cols-3 divide-x divide-brand-cream/60 border-t border-brand-cream/60">
+                        <button
+                          type="button"
+                          onClick={() => loadDraft(draft)}
+                          className="py-2.5 text-xs font-medium text-muted-foreground transition hover:bg-brand-cream/20 hover:text-[#24190f]"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => publishDraft(draft)}
+                          disabled={saving}
+                          className="py-2.5 text-xs font-medium text-brand-orange transition hover:bg-brand-orange/5 disabled:opacity-50"
+                        >
+                          Publish
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteDraft(draft._draftId)}
+                          className="py-2.5 text-xs font-medium text-muted-foreground transition hover:bg-red-50 hover:text-red-500"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-center text-xs text-muted-foreground/60">
+                  Saved drafts will appear here
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>

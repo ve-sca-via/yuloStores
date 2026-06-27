@@ -22,7 +22,9 @@ export function useUpdateSettings(restaurantId) {
   return useMutation({
     mutationFn: (body) => ownerApi.updateSettings(restaurantId, body),
     onSuccess: ({ data }) => {
-      qc.setQueryData(settingsKeys.main(restaurantId), data.data?.restaurant ?? data.data);
+      // Response shape: { status, message, data: { restaurant: {...} } }
+      const restaurant = data.data?.restaurant;
+      if (restaurant) qc.setQueryData(settingsKeys.main(restaurantId), restaurant);
     },
   });
 }
